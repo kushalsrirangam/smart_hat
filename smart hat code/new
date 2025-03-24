@@ -1,0 +1,205 @@
+from flask import Flask, request, jsonify, Response, render_template_string
+import subprocess
+import os
+import json
+import threading
+import cv2
+import numpy as np
+import tflite_runtime.interpreter as tflite
+from picamera2 import Picamera2, Platform
+from datetime import datetime
+import time
+import lgpio
+
+app = Flask(__name__)
+
+CONFIG_FILE = "/home/ada/de/detection/config.json"
+MODEL_PATH = "/home/ada/de/mobilenet_v2.tflite"
+LABEL_PATH = "/home/ada/de/coco_labels.txt"
+LOG_FILE = "/home/ada/de/logs/detections_log.txt"
+
+normalSize = (1920, 1080)
+lowresSize = (300, 300)
+latest_frame = None
+frame_lock = threading.Lock()
+detection_process = None
+pending_message = None
+ultrasonic_readings = {}
+last_spoken_message = ""
+last_spoken_time = 0
+
+CHIP = 4
+SENSORS = {
+    "Left Front":  {"trigger": 4,  "echo": 17},
+    "Left Middle": {"trigger": 27, "echo": 22},
+    "Left Rear":   {"trigger": 23, "echo": 24},
+    "Right Front": {"trigger": 5,  "echo": 6},
+    "Right Middle": {"trigger": 12, "echo": 13},
+    "Right Rear":   {"trigger": 19, "echo": 26}
+}
+
+def read_label_file(file_path):
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+    return {int(line.split()[0]): line.strip().split(maxsplit=1)[1] for line in lines}
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {"filter_classes": ["person"], "logging": True}
+
+def measure_distance(h, trigger_pin, echo_pin, timeout=0.02):
+    lgpio.gpio_write(h, trigger_pin, 1)
+    time.sleep(0.00001)
+    lgpio.gpio_write(h, trigger_pin, 0)
+    start_time = time.time()
+    stop_time = time.time()
+
+    timeout_start = time.time()
+    while lgpio.gpio_read(h, echo_pin) == 0:
+        start_time = time.time()
+        if time.time() - timeout_start > timeout:
+            return "No Echo"
+
+    timeout_start = time.time()
+    while lgpio.gpio_read(h, echo_pin) == 1:
+        stop_time = time.time()
+        if time.time() - timeout_start > timeout:
+            return "Echo Timeout"
+
+    time_elapsed = stop_time - start_time
+    distance = (time_elapsed * 34300) / 2
+
+    if distance <= 2 or distance > 400:
+        return "Out of Range"
+
+    return round(distance, 2)
+
+def ultrasonic_loop():
+    global ultrasonic_readings
+    h = lgpio.gpiochip_open(CHIP)
+    for sensor in SENSORS.values():
+        lgpio.gpio_claim_output(h, sensor["trigger"])
+        lgpio.gpio_claim_input(h, sensor["echo"])
+
+    try:
+        while True:
+            temp_readings = {}
+            for name, sensor in SENSORS.items():
+                dist = measure_distance(h, sensor["trigger"], sensor["echo"])
+                temp_readings[name] = dist
+            ultrasonic_readings = temp_readings
+            time.sleep(0.2)
+    except Exception as e:
+        print("[Ultrasonic Error]", e)
+    finally:
+        lgpio.gpiochip_close(h)
+
+def detection_loop():
+    global latest_frame, last_spoken_message, last_spoken_time, pending_message
+    labels = read_label_file(LABEL_PATH)
+    config = load_config()
+    filter_classes = config.get("filter_classes", [])
+    enable_logging = config.get("logging", True)
+
+    interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    picam2 = Picamera2()
+    stream_format = "YUV420"
+    if Picamera2.platform == Platform.PISP:
+        stream_format = "RGB888"
+    camera_config = picam2.create_preview_configuration(
+        main={"size": normalSize},
+        lores={"size": lowresSize, "format": stream_format}
+    )
+    picam2.configure(camera_config)
+    picam2.start()
+
+    try:
+        while True:
+            try:
+                img = picam2.capture_array("lores")
+                if stream_format == "YUV420":
+                    img = cv2.cvtColor(img, cv2.COLOR_YUV420p2RGB)
+                height, width = input_details[0]['shape'][1:3]
+                img_resized = cv2.resize(img, (width, height)).astype(np.uint8)
+                input_data = np.expand_dims(img_resized, axis=0)
+                interpreter.set_tensor(input_details[0]['index'], input_data)
+                interpreter.invoke()
+
+                boxes = interpreter.get_tensor(output_details[0]['index'])[0]
+                classes = interpreter.get_tensor(output_details[1]['index'])[0]
+                scores = interpreter.get_tensor(output_details[2]['index'])[0]
+                num_detections = int(interpreter.get_tensor(output_details[3]['index'])[0])
+
+                frame = picam2.capture_array("main")
+                if len(frame.shape) == 3 and frame.shape[2] == 4:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                output_frame = frame.copy()
+
+                for i in range(num_detections):
+                    score = scores[i]
+                    if score > 0.5:
+                        class_id = int(classes[i])
+                        label = labels.get(class_id, f"id:{class_id}")
+                        if label in filter_classes:
+                            ymin, xmin, ymax, xmax = boxes[i]
+                            xmin = int(xmin * normalSize[0])
+                            xmax = int(xmax * normalSize[0])
+                            ymin = int(ymin * normalSize[1])
+                            ymax = int(ymax * normalSize[1])
+                            cv2.rectangle(output_frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+                            cv2.putText(output_frame, f"{label} {score:.2f}", (xmin, ymin - 10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                            if enable_logging:
+                                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                box_width = xmax - xmin
+                                box_height = ymax - ymin
+                                center_x = (xmin + xmax) / 2
+                                is_left = center_x < normalSize[0] * 0.3
+                                is_right = center_x > normalSize[0] * 0.7
+                                is_front_center = normalSize[0] * 0.3 <= center_x <= normalSize[0] * 0.7
+                                is_large_box = box_width > 300 or box_height > 300
+                                if is_large_box:
+                                    now = time.time()
+                                    message = None
+                                    if is_front_center:
+                                        message = f"Danger! {label} detected ahead."
+                                    elif is_left:
+                                        message = f"Caution! {label} on your left."
+                                    elif is_right:
+                                        message = f"Caution! {label} on your right."
+                                    if message and (message != last_spoken_message or now - last_spoken_time > 5):
+                                        pending_message = message
+                                        last_spoken_message = message
+                                        last_spoken_time = now
+                                log_entry = {
+                                    "timestamp": timestamp,
+                                    "label": label,
+                                    "score": round(score, 2),
+                                    "bbox": [xmin, ymin, xmax, ymax],
+                                    "sensors": ultrasonic_readings.copy()
+                                }
+                                with open(LOG_FILE, 'a') as log:
+                                    log.write(json.dumps(log_entry) + '\n')
+
+                ret, jpeg = cv2.imencode('.jpg', output_frame)
+                if ret:
+                    with frame_lock:
+                        latest_frame = jpeg.tobytes()
+            except Exception as e:
+                print(f"[Detection Error] {e}")
+    except KeyboardInterrupt:
+        print("[Detection] Stopped")
+    finally:
+        picam2.stop()
+
+if __name__ == '__main__':
+    threading.Thread(target=ultrasonic_loop, daemon=True).start()
+    from flask_socketio import SocketIO
+    socketio = SocketIO(app)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
