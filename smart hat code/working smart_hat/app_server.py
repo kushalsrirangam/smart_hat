@@ -27,7 +27,8 @@ MODEL_PATH = "/home/ada/de/mobilenet_v2.tflite"
 LABEL_PATH = "/home/ada/de/coco_labels.txt"
 PANEL_PATH = "/home/ada/de/app_server"
 VIDEO_LOG_DIR = "/home/ada/de/videolog"
-PERF_LOG_FILE = "/home/ada/de/logs/performance_log.csv"
+LOG_DIR = "/home/ada/de/logs"
+UNIFIED_LOG_FILE = f"{LOG_DIR}/unified_log.csv"
 
 normalSize = (1920, 1080)
 lowresSize = (300, 300)
@@ -37,11 +38,12 @@ frame_lock = threading.Lock()
 detection_active = True
 config_data = {"filter_classes": ["person"], "logging": True}
 
+# Ensure directories and unified log file exist
 os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
-os.makedirs("/home/ada/de/logs", exist_ok=True)
-if not os.path.exists(PERF_LOG_FILE):
-    with open(PERF_LOG_FILE, "w") as f:
-        f.write("timestamp,event,label,actual_distance_cm,estimated_distance_cm,ultrasonic_cm,confidence,FPS,issue\n")
+os.makedirs(LOG_DIR, exist_ok=True)
+if not os.path.exists(UNIFIED_LOG_FILE):
+    with open(UNIFIED_LOG_FILE, "w") as f:
+        f.write("timestamp,event_type,label,confidence,estimated_distance_cm,ultrasonic_cm,actual_distance_cm,sensor_side,FPS,CPU,MEM,TEMP,video_filename,action,issue\n")
 
 CHIP = 4
 SENSORS = {
@@ -55,16 +57,11 @@ SENSORS = {
 
 ultrasonic_readings = {}
 
+# --- Utility Functions ---
 def read_label_file(file_path):
     with open(file_path, 'r') as f:
         lines = f.readlines()
     return {int(line.split()[0]): line.strip().split(maxsplit=1)[1] for line in lines}
-
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    return {"filter_classes": ["person"], "logging": True}
 
 def calculate_distance(actual_width, focal_length, bounding_box_width):
     if bounding_box_width == 0:
@@ -96,82 +93,6 @@ def measure_distance(h, trigger_pin, echo_pin, timeout=0.02):
         return "Out of Range"
     return round(distance, 2)
 
-@app.route("/")
-def index():
-    return "<h1>Welcome to the Detection App</h1>"
-
-@app.route('/favicon.ico')
-def favicon():
-    return send_from_directory(os.path.join(app.root_path, 'static'),
-                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
-
-@app.route('/video_feed')
-def video_feed():
-    def generate():
-        while True:
-            with frame_lock:
-                if latest_frame is None:
-                    continue
-                frame = latest_frame
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.5)
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/stream')
-def stream():
-    return """<html><head><title>Detection Video Stream</title></head>
-              <body><h1>Live Video Feed</h1><img src='/video_feed' width='640' height='480'></body></html>"""
-
-@app.route('/control_panel')
-def control_panel():
-    try:
-        with open(os.path.join(PANEL_PATH, "control_panel.html"), "r") as f:
-            html = f.read()
-        return render_template_string(html)
-    except Exception as e:
-        return f"Error loading control panel: {e}"
-
-@app.route('/start', methods=['POST'])
-def start_detection():
-    global detection_active
-    detection_active = True
-    return jsonify({"status": "Detection started"})
-
-@app.route('/stop', methods=['POST'])
-def stop_detection():
-    global detection_active
-    detection_active = False
-    return jsonify({"status": "Detection stopped"})
-
-@app.route('/status', methods=['GET'])
-def status():
-    return jsonify({"detection_active": detection_active})
-
-@app.route('/config', methods=['POST'])
-def update_config():
-    global config_data
-    data = request.get_json()
-    config_data.update(data)
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f)
-    return jsonify({"status": "Configuration updated", "config": config_data})
-
-@app.route('/log', methods=['GET'])
-def get_log():
-    try:
-        logs = db.collection('detections').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()
-        log_list = [json.dumps(log.to_dict()) for log in logs]
-        return jsonify(log_list[::-1])
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route('/speak', methods=['POST'])
-def speak_message():
-    message = request.json.get("message", "")
-    os.system(f"espeak '{message}'")
-    return jsonify({"status": "spoken", "message": message})
-
 def ultrasonic_loop():
     global ultrasonic_readings
     h = lgpio.gpiochip_open(CHIP)
@@ -180,17 +101,18 @@ def ultrasonic_loop():
         lgpio.gpio_claim_input(h, sensor["echo"])
     try:
         while True:
-            temp_readings = {}
+            readings = {}
             for name, sensor in SENSORS.items():
                 dist = measure_distance(h, sensor["trigger"], sensor["echo"])
-                temp_readings[name] = dist
-            ultrasonic_readings = temp_readings
+                readings[name] = dist
+            ultrasonic_readings = readings
             time.sleep(0.2)
     except Exception as e:
         print("[Ultrasonic Error]", e)
     finally:
         lgpio.gpiochip_close(h)
 
+# --- Detection Loop ---
 def detection_loop():
     global latest_frame
     labels = read_label_file(LABEL_PATH)
@@ -213,6 +135,8 @@ def detection_loop():
     video_frames = []
     video_start_time = time.time()
     fps = 10
+    last_stat_time = 0
+    stat_interval = 20
 
     try:
         while True:
@@ -242,6 +166,20 @@ def detection_loop():
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                 output_frame = frame.copy()
 
+                sensor_side = "N/A"
+                ultra_val = "N/A"
+                if ultrasonic_readings:
+                    try:
+                        closest = min((v for v in ultrasonic_readings.values() if isinstance(v, (int, float))), default=None)
+                        if closest is not None:
+                            for side, dist in ultrasonic_readings.items():
+                                if dist == closest:
+                                    sensor_side = side
+                                    ultra_val = dist
+                                    break
+                    except:
+                        pass
+
                 for i in range(num_detections):
                     score = scores[i]
                     if score > 0.5:
@@ -265,39 +203,25 @@ def detection_loop():
                             if distance < 10:
                                 os.system("espeak 'Warning, object too close, please stop.'")
 
-                            if config_data.get("logging", True):
-                                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                log_entry = {
-                                    "timestamp": timestamp,
-                                    "label": label,
-                                    "score": float(round(score, 2)),
-                                    "bbox": [xmin, ymin, xmax, ymax],
-                                    "distance_cm": distance,
-                                    "sensors": ultrasonic_readings.copy()
-                                }
-                                try:
-                                    db.collection('detections').add(log_entry)
-                                except Exception as e:
-                                    print("Error writing to Firestore:", e)
-
                             loop_end = time.time()
                             fps_val = 1.0 / (loop_end - loop_start)
-                            ultra_val = ultrasonic_readings.get("Left Front", "N/A")
-                            perf_log = f"{datetime.now()},detection,{label},N/A,{distance},{ultra_val},{score:.2f},{fps_val:.2f},ok\n"
-                            with open(PERF_LOG_FILE, "a") as f:
-                                f.write(perf_log)
+
+                            with open(UNIFIED_LOG_FILE, "a") as f:
+                                f.write(f"{datetime.now()},detection,{label},{score:.2f},{distance},{ultra_val},,,{sensor_side},{fps_val:.2f},,,,,spoken_alert,ok\n")
 
                 ret, jpeg = cv2.imencode('.jpg', output_frame)
                 if ret:
                     with frame_lock:
                         latest_frame = jpeg.tobytes()
 
-                if int(time.time()) % 20 == 0:
+                now = time.time()
+                if now - last_stat_time >= stat_interval:
+                    last_stat_time = now
                     cpu = psutil.cpu_percent()
                     mem = psutil.virtual_memory().percent
                     temp = subprocess.check_output(["vcgencmd", "measure_temp"]).decode().strip().split('=')[1]
-                    with open(PERF_LOG_FILE, "a") as f:
-                        f.write(f"{datetime.now()},system_stats,N/A,N/A,N/A,N/A,N/A,N/A,CPU:{cpu}%, MEM:{mem}%, TEMP:{temp}\n")
+                    with open(UNIFIED_LOG_FILE, "a") as f:
+                        f.write(f"{datetime.now()},system_stats,,,,,,,{sensor_side},,{cpu},{mem},{temp},,,\n")
 
             except Exception as e:
                 print(f"[Detection Error] {e}")
@@ -307,9 +231,11 @@ def detection_loop():
     finally:
         picam2.stop()
 
+# --- Main Entry Point ---
 if __name__ == '__main__':
     threading.Thread(target=ultrasonic_loop, daemon=True).start()
     threading.Thread(target=detection_loop, daemon=True).start()
     from flask_socketio import SocketIO
     socketio = SocketIO(app)
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
+
