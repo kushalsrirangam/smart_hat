@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Smart Hat Unified Interface</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      /* Global styling */
+      body {
+        margin: 0;
+        padding: 20px;
+        background: linear-gradient(135deg, #f6d365, #fda085);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      }
+      /* Container for the unified interface */
+      .container {
+        max-width: 900px;
+        margin: 40px auto;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0px 8px 16px rgba(0, 0, 0, 0.2);
+      }
+      h1, h2, h3 {
+        text-align: center;
+        color: #333;
+      }
+      /* Button styling */
+      button {
+        background-color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 12px 24px;
+        margin: 8px;
+        font-size: 16px;
+        cursor: pointer;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s, background-color 0.2s;
+      }
+      button:hover {
+        transform: scale(1.05);
+        background-color: #f0f0f0;
+      }
+      /* Input styling */
+      input[type="text"] {
+        width: calc(100% - 22px);
+        padding: 10px;
+        margin: 8px 0;
+        font-size: 16px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+      /* Checkbox container styling */
+      .checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .checkbox-group label {
+        margin: 0 10px;
+        font-size: 16px;
+      }
+      /* Log box styling */
+      .log-box {
+        background: #fff;
+        padding: 15px;
+        margin-top: 20px;
+        border-radius: 8px;
+        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        min-height: 100px;
+        overflow-y: auto;
+        display: none; /* hidden by default */
+      }
+      /* Link styling */
+      a {
+        display: inline-block;
+        margin: 10px 0;
+        color: #0077cc;
+        font-weight: bold;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+    <script>
+      // Generic function to send HTTP requests
+      function sendRequest(endpoint, method = 'GET', data = null) {
+        fetch(endpoint, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: data ? JSON.stringify(data) : null
+        })
+          .then(response => response.json())
+          .then(result => {
+            console.log(result);
+            alert(JSON.stringify(result));
+          })
+          .catch(error => {
+            console.error('Error:', error);
+          });
+      }
+      
+      // Control commands
+      function startDetection() {
+        sendRequest('/start', 'POST');
+      }
+      function stopDetection() {
+        sendRequest('/stop', 'POST');
+      }
+      function checkStatus() {
+        sendRequest('/status', 'GET');
+      }
+      function sendVoice() {
+        const msg = document.getElementById("voiceInput").value;
+        sendRequest('/speak', 'POST', { message: msg });
+      }
+      
+      // Update configuration by collecting all checked filter classes
+      function updateConfig() {
+        const checkboxes = document.querySelectorAll('input[name="filterClass"]:checked');
+        const selected = Array.from(checkboxes).map(checkbox => checkbox.value);
+        sendRequest('/config', 'POST', { filter_classes: selected, logging: true });
+      }
+      
+      // Log functions to display detection events
+      let logInterval; // to store the interval reference
+
+      function loadLog() {
+        fetch('/log')
+          .then(res => res.json())
+          .then(data => {
+            // Reverse the order to show the most recent detection at the top
+            document.getElementById("log").innerHTML = data.reverse().join("<br>");
+          })
+          .catch(error => {
+            document.getElementById("log").innerHTML = "Error loading log.";
+            console.error('Error:', error);
+          });
+      }
+      
+      // Toggle the log visibility and auto-refreshing
+      function toggleLog() {
+        const logBox = document.getElementById("log");
+        const toggleButton = document.getElementById("toggleLogButton");
+        if (logBox.style.display === "none") {
+          logBox.style.display = "block";
+          toggleButton.textContent = "Hide Live Detection Log";
+          // Load log immediately and set interval for auto-refresh every 5 seconds
+          loadLog();
+          logInterval = setInterval(loadLog, 5000);
+        } else {
+          logBox.style.display = "none";
+          toggleButton.textContent = "Show Live Detection Log";
+          clearInterval(logInterval);
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Smart Hat Unified Interface</h1>
+      
+      <!-- Control Section -->
+      <section>
+        <h2>Control Panel</h2>
+        <div style="text-align:center;">
+          <button onclick="startDetection()">🟢 Start Detection</button>
+          <button onclick="stopDetection()">🔴 Stop Detection</button>
+          <button onclick="checkStatus()">📊 Check Status</button>
+        </div>
+      </section>
+      
+      <hr>
+      
+      <!-- Voice and Config Section -->
+      <section>
+        <h2>Voice & Configuration</h2>
+        <div>
+          <h3>Send Voice Message</h3>
+          <input type="text" id="voiceInput" placeholder="Enter a message...">
+          <button onclick="sendVoice()">📢 Speak</button>
+        </div>
+        <div>
+          <h3>Update Filter Classes</h3>
+          <div class="checkbox-group">
+            <label><input type="checkbox" name="filterClass" value="person"> person</label>
+            <label><input type="checkbox" name="filterClass" value="dog"> dog</label>
+            <label><input type="checkbox" name="filterClass" value="cat"> cat</label>
+            <label><input type="checkbox" name="filterClass" value="car"> car</label>
+            <label><input type="checkbox" name="filterClass" value="bus"> bus</label>
+            <label><input type="checkbox" name="filterClass" value="bicycle"> bicycle</label>
+            <label><input type="checkbox" name="filterClass" value="motorcycle"> motorcycle</label>
+          </div>
+          <button onclick="updateConfig()">✅ Update Config</button>
+        </div>
+      </section>
+      
+      <hr>
+      
+      <!-- Live Log Section as a Button Toggle -->
+      <section style="text-align: center;">
+        <h2>Live Detection Log</h2>
+        <button id="toggleLogButton" onclick="toggleLog()">Show Live Detection Log</button>
+        <div id="log" class="log-box">Loading logs...</div>
+      </section>
+      
+      <hr>
+      
+      <!-- Additional Links -->
+      <div style="text-align:center;">
+        <a href="/stream" target="_blank">View Live Stream</a> |
+        <a href="/feed" target="_blank">View Feed Panel</a>
+      </div>
+    </div>
+  </body>
+</html>
