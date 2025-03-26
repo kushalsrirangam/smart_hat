@@ -37,13 +37,14 @@ frame_lock = threading.Lock()
 
 detection_active = True
 config_data = {"filter_classes": ["person"], "logging": True}
+espeak_count = 0  # Track voice alerts
 
 # Ensure directories and unified log file exist
 os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 if not os.path.exists(UNIFIED_LOG_FILE):
     with open(UNIFIED_LOG_FILE, "w") as f:
-        f.write("timestamp,event_type,label,confidence,estimated_distance_cm,ultrasonic_cm,actual_distance_cm,sensor_side,FPS,CPU,MEM,TEMP,video_filename,action,issue\n")
+        f.write("timestamp,event_type,label,confidence,estimated_distance_cm,ultrasonic_cm,actual_distance_cm,sensor_side,FPS,CPU,MEM,TEMP,video_filename,action,issue,estimated_power_mw\n")
 
 CHIP = 4
 SENSORS = {
@@ -117,81 +118,17 @@ def ultrasonic_loop():
 def index():
     return redirect("/control_panel")
 
-@app.route('/favicon.ico')
-def favicon():
-    return send_from_directory(os.path.join(app.root_path, 'static'),
-                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
-
-@app.route('/video_feed')
-def video_feed():
-    def generate():
-        while True:
-            with frame_lock:
-                if latest_frame is None:
-                    continue
-                frame = latest_frame
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.5)
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/stream')
-def stream():
-    return """<html><head><title>Detection Video Stream</title></head>
-              <body><h1>Live Video Feed</h1><img src='/video_feed' width='640' height='480'></body></html>"""
-
-@app.route('/control_panel')
-def control_panel():
-    try:
-        with open(os.path.join(PANEL_PATH, "control_panel.html"), "r") as f:
-            html = f.read()
-        return render_template_string(html)
-    except Exception as e:
-        return f"Error loading control panel: {e}"
-
-@app.route('/start', methods=['POST'])
-def start_detection():
-    global detection_active
-    detection_active = True
-    return jsonify({"status": "Detection started"})
-
-@app.route('/stop', methods=['POST'])
-def stop_detection():
-    global detection_active
-    detection_active = False
-    return jsonify({"status": "Detection stopped"})
-
-@app.route('/status', methods=['GET'])
-def status():
-    return jsonify({"detection_active": detection_active})
-
-@app.route('/config', methods=['POST'])
-def update_config():
-    global config_data
-    data = request.get_json()
-    config_data.update(data)
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f)
-    return jsonify({"status": "Configuration updated", "config": config_data})
-
-@app.route('/log', methods=['GET'])
-def get_log():
-    try:
-        logs = db.collection('detections').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()
-        log_list = [json.dumps(log.to_dict()) for log in logs]
-        return jsonify(log_list[::-1])
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
 @app.route('/speak', methods=['POST'])
 def speak_message():
+    global espeak_count
     message = request.json.get("message", "")
     os.system(f"espeak '{message}'")
+    espeak_count += 1
     return jsonify({"status": "spoken", "message": message})
 
 # --- Detection Loop ---
 def detection_loop():
-    global latest_frame
+    global latest_frame, espeak_count
     labels = read_label_file(LABEL_PATH)
     interpreter = tflite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
@@ -209,8 +146,6 @@ def detection_loop():
     picam2.configure(camera_config)
     picam2.start()
 
-    video_frames = []
-    video_start_time = time.time()
     fps = 10
     last_stat_time = 0
     stat_interval = 20
@@ -222,7 +157,6 @@ def detection_loop():
                 continue
 
             loop_start = time.time()
-
             try:
                 img = picam2.capture_array("lores")
                 if stream_format == "YUV420":
@@ -230,8 +164,11 @@ def detection_loop():
                 height, width = input_details[0]['shape'][1:3]
                 img_resized = cv2.resize(img, (width, height)).astype(np.uint8)
                 input_data = np.expand_dims(img_resized, axis=0)
+
+                infer_start = time.time()
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
+                inference_time = (time.time() - infer_start) * 1000  # ms
 
                 boxes = interpreter.get_tensor(output_details[0]['index'])[0]
                 classes = interpreter.get_tensor(output_details[1]['index'])[0]
@@ -268,23 +205,23 @@ def detection_loop():
                             xmax = int(xmax * normalSize[0])
                             ymin = int(ymin * normalSize[1])
                             ymax = int(ymax * normalSize[1])
-                            cv2.rectangle(output_frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
-                            cv2.putText(output_frame, f"{label} {score:.2f}", (xmin, ymin - 10),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
                             box_width = xmax - xmin
                             distance = calculate_distance(50, 800, box_width)
-                            cv2.putText(output_frame, f"{distance:.2f} cm", (xmin, ymax + 30),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
                             if distance < 10:
                                 os.system("espeak 'Warning, object too close, please stop.'")
+                                espeak_count += 1
 
                             loop_end = time.time()
                             fps_val = 1.0 / (loop_end - loop_start)
+                            cpu = psutil.cpu_percent()
+                            mem = psutil.virtual_memory().percent
+                            temp = subprocess.check_output(["vcgencmd", "measure_temp"]).decode().strip().split('=')[1]
+
+                            estimated_power = (cpu * 20) + (mem * 10) + (inference_time * 2) + (espeak_count * 50)
 
                             with open(UNIFIED_LOG_FILE, "a") as f:
-                                f.write(f"{datetime.now()},detection,{label},{score:.2f},{distance},{ultra_val},,,{sensor_side},{fps_val:.2f},,,,,spoken_alert,ok\n")
+                                f.write(f"{datetime.now()},detection,{label},{score:.2f},{distance},{ultra_val},,,{sensor_side},{fps_val:.2f},{cpu},{mem},{temp},,,{estimated_power:.1f}\n")
 
                 ret, jpeg = cv2.imencode('.jpg', output_frame)
                 if ret:
@@ -315,5 +252,3 @@ if __name__ == '__main__':
     from flask_socketio import SocketIO
     socketio = SocketIO(app)
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
-
-
