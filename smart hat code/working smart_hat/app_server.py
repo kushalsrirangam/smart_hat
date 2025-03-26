@@ -112,6 +112,83 @@ def ultrasonic_loop():
     finally:
         lgpio.gpiochip_close(h)
 
+# --- Flask Routes ---
+@app.route("/")
+def index():
+    return redirect("/control_panel")
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.root_path, 'static'),
+                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/video_feed')
+def video_feed():
+    def generate():
+        while True:
+            with frame_lock:
+                if latest_frame is None:
+                    continue
+                frame = latest_frame
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.5)
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/stream')
+def stream():
+    return """<html><head><title>Detection Video Stream</title></head>
+              <body><h1>Live Video Feed</h1><img src='/video_feed' width='640' height='480'></body></html>"""
+
+@app.route('/control_panel')
+def control_panel():
+    try:
+        with open(os.path.join(PANEL_PATH, "control_panel.html"), "r") as f:
+            html = f.read()
+        return render_template_string(html)
+    except Exception as e:
+        return f"Error loading control panel: {e}"
+
+@app.route('/start', methods=['POST'])
+def start_detection():
+    global detection_active
+    detection_active = True
+    return jsonify({"status": "Detection started"})
+
+@app.route('/stop', methods=['POST'])
+def stop_detection():
+    global detection_active
+    detection_active = False
+    return jsonify({"status": "Detection stopped"})
+
+@app.route('/status', methods=['GET'])
+def status():
+    return jsonify({"detection_active": detection_active})
+
+@app.route('/config', methods=['POST'])
+def update_config():
+    global config_data
+    data = request.get_json()
+    config_data.update(data)
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config_data, f)
+    return jsonify({"status": "Configuration updated", "config": config_data})
+
+@app.route('/log', methods=['GET'])
+def get_log():
+    try:
+        logs = db.collection('detections').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()
+        log_list = [json.dumps(log.to_dict()) for log in logs]
+        return jsonify(log_list[::-1])
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/speak', methods=['POST'])
+def speak_message():
+    message = request.json.get("message", "")
+    os.system(f"espeak '{message}'")
+    return jsonify({"status": "spoken", "message": message})
+
 # --- Detection Loop ---
 def detection_loop():
     global latest_frame
@@ -238,4 +315,5 @@ if __name__ == '__main__':
     from flask_socketio import SocketIO
     socketio = SocketIO(app)
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
+
 
