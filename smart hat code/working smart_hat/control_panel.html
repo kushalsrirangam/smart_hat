@@ -1,217 +1,160 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta charset="UTF-8">
-    <title>Smart Hat Unified Interface</title>
+    <meta charset="utf-8">
+    <title>Smart Hat - Google Maps Navigation</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
     <style>
-      /* Global styling */
       body {
+        font-family: 'Orbitron', sans-serif;
         margin: 0;
+        padding: 0;
+        background: #0a0a0a;
+        color: #00ffc8;
+      }
+      #map {
+        height: 60vh;
+        width: 100%;
+        filter: grayscale(20%) brightness(90%) contrast(120%);
+      }
+      #panel {
         padding: 20px;
-        background: linear-gradient(135deg, #f6d365, #fda085);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #121212;
+        box-shadow: 0 0 20px rgba(0, 255, 200, 0.2);
+        border-top: 2px solid #00ffc8;
       }
-      /* Container for the unified interface */
-      .container {
-        max-width: 900px;
-        margin: 40px auto;
-        background: rgba(255, 255, 255, 0.9);
-        padding: 30px;
-        border-radius: 12px;
-        box-shadow: 0px 8px 16px rgba(0, 0, 0, 0.2);
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        margin-bottom: 15px;
       }
-      h1, h2, h3 {
-        text-align: center;
-        color: #333;
-      }
-      /* Button styling */
       button {
-        background-color: #fff;
+        background-color: #00ffc8;
+        color: #000;
         border: none;
-        border-radius: 6px;
+        font-weight: bold;
         padding: 12px 24px;
-        margin: 8px;
-        font-size: 16px;
+        border-radius: 10px;
         cursor: pointer;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-        transition: transform 0.2s, background-color 0.2s;
+        font-size: 16px;
+        box-shadow: 0 0 12px rgba(0,255,200,0.6);
+        transition: transform 0.2s ease;
       }
       button:hover {
         transform: scale(1.05);
-        background-color: #f0f0f0;
+        background-color: #00e6b0;
       }
-      /* Input styling */
-      input[type="text"] {
-        width: calc(100% - 22px);
-        padding: 10px;
-        margin: 8px 0;
-        font-size: 16px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-      }
-      /* Checkbox container styling */
-      .checkbox-group {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-      }
-      .checkbox-group label {
-        margin: 0 10px;
-        font-size: 16px;
-      }
-      /* Log box styling */
-      .log-box {
-        background: #fff;
-        padding: 15px;
-        margin-top: 20px;
-        border-radius: 8px;
-        box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-        min-height: 100px;
-        overflow-y: auto;
-        display: none; /* hidden by default */
-      }
-      /* Link styling */
-      a {
-        display: inline-block;
-        margin: 10px 0;
-        color: #0077cc;
-        font-weight: bold;
-        text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
+      p {
+        text-align: center;
+        font-size: 14px;
+        color: #bbb;
       }
     </style>
     <script>
-      // Generic function to send HTTP requests
-      function sendRequest(endpoint, method = 'GET', data = null) {
-        fetch(endpoint, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: data ? JSON.stringify(data) : null
-        })
-          .then(response => response.json())
-          .then(result => {
-            console.log(result);
-            alert(JSON.stringify(result));
-          })
-          .catch(error => {
-            console.error('Error:', error);
-          });
-      }
-      
-      // Control commands
-      function startDetection() {
-        sendRequest('/start', 'POST');
-      }
-      function stopDetection() {
-        sendRequest('/stop', 'POST');
-      }
-      function checkStatus() {
-        sendRequest('/status', 'GET');
-      }
-      function sendVoice() {
-        const msg = document.getElementById("voiceInput").value;
-        sendRequest('/speak', 'POST', { message: msg });
-      }
-      
-      // Update configuration by collecting all checked filter classes
-      function updateConfig() {
-        const checkboxes = document.querySelectorAll('input[name="filterClass"]:checked');
-        const selected = Array.from(checkboxes).map(checkbox => checkbox.value);
-        sendRequest('/config', 'POST', { filter_classes: selected, logging: true });
-      }
-      
-      // Log functions to display detection events
-      let logInterval; // to store the interval reference
+      let map, directionsService, directionsRenderer;
+      let waypoints = [];
+      let markerList = [];
+      let voiceEnabled = true;
 
-      function loadLog() {
-        fetch('/log')
-          .then(res => res.json())
-          .then(data => {
-            // Reverse the order to show the most recent detection at the top
-            document.getElementById("log").innerHTML = data.reverse().join("<br>");
-          })
-          .catch(error => {
-            document.getElementById("log").innerHTML = "Error loading log.";
-            console.error('Error:', error);
-          });
+      function initMap() {
+        map = new google.maps.Map(document.getElementById("map"), {
+          center: { lat: 37.7749, lng: -122.4194 },
+          zoom: 14,
+          styles: [
+            { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
+            { elementType: 'labels.text.fill', stylers: [{ color: '#8ec3b9' }] },
+            { elementType: 'labels.text.stroke', stylers: [{ color: '#1a3646' }] },
+            { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
+            { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+            { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#304a7d' }] },
+            { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] }
+          ]
+        });
+
+        directionsService = new google.maps.DirectionsService();
+        directionsRenderer = new google.maps.DirectionsRenderer({ map: map });
+
+        map.addListener("click", (e) => {
+          addWaypoint(e.latLng);
+        });
       }
-      
-      // Toggle the log visibility and auto-refreshing
-      function toggleLog() {
-        const logBox = document.getElementById("log");
-        const toggleButton = document.getElementById("toggleLogButton");
-        if (logBox.style.display === "none") {
-          logBox.style.display = "block";
-          toggleButton.textContent = "Hide Live Detection Log";
-          // Load log immediately and set interval for auto-refresh every 5 seconds
-          loadLog();
-          logInterval = setInterval(loadLog, 5000);
-        } else {
-          logBox.style.display = "none";
-          toggleButton.textContent = "Show Live Detection Log";
-          clearInterval(logInterval);
+
+      function addWaypoint(latlng) {
+        const marker = new google.maps.Marker({ position: latlng, map: map });
+        markerList.push(marker);
+        waypoints.push({ location: latlng, stopover: true });
+        speak(`Waypoint added at ${latlng.lat().toFixed(4)}, ${latlng.lng().toFixed(4)}`);
+      }
+
+      function clearWaypoints() {
+        waypoints = [];
+        markerList.forEach(m => m.setMap(null));
+        markerList = [];
+        directionsRenderer.set('directions', null);
+      }
+
+      function startNavigation() {
+        if (waypoints.length < 2) {
+          alert("Add at least two waypoints.");
+          return;
         }
+
+        const origin = waypoints[0].location;
+        const destination = waypoints[waypoints.length - 1].location;
+        const middle = waypoints.slice(1, waypoints.length - 1);
+
+        directionsService.route({
+          origin: origin,
+          destination: destination,
+          waypoints: middle,
+          travelMode: google.maps.TravelMode.WALKING
+        }, (result, status) => {
+          if (status === "OK") {
+            directionsRenderer.setDirections(result);
+            const steps = result.routes[0].legs.flatMap(leg => leg.steps);
+            speakInstructions(steps);
+          } else {
+            alert("Directions request failed due to " + status);
+          }
+        });
+      }
+
+      function speakInstructions(steps) {
+        steps.forEach((step, i) => {
+          setTimeout(() => {
+            if (voiceEnabled && 'speechSynthesis' in window) {
+              const msg = new SpeechSynthesisUtterance(step.instructions.replace(/<[^>]*>/g, ''));
+              speechSynthesis.speak(msg);
+            }
+          }, i * 6000);
+        });
+      }
+
+      function speak(text) {
+        if (voiceEnabled && 'speechSynthesis' in window) {
+          const msg = new SpeechSynthesisUtterance(text);
+          speechSynthesis.speak(msg);
+        }
+      }
+
+      function alertObstacle() {
+        if (voiceEnabled) speak("⚠ Obstacle ahead. Please stop.");
       }
     </script>
   </head>
   <body>
-    <div class="container">
-      <h1>Smart Hat Unified Interface</h1>
-      
-      <!-- Control Section -->
-      <section>
-        <h2>Control Panel</h2>
-        <div style="text-align:center;">
-          <button onclick="startDetection()">🟢 Start Detection</button>
-          <button onclick="stopDetection()">🔴 Stop Detection</button>
-          <button onclick="checkStatus()">📊 Check Status</button>
-        </div>
-      </section>
-      
-      <hr>
-      
-      <!-- Voice and Config Section -->
-      <section>
-        <h2>Voice & Configuration</h2>
-        <div>
-          <h3>Send Voice Message</h3>
-          <input type="text" id="voiceInput" placeholder="Enter a message...">
-          <button onclick="sendVoice()">📢 Speak</button>
-        </div>
-        <div>
-          <h3>Update Filter Classes</h3>
-          <div class="checkbox-group">
-            <label><input type="checkbox" name="filterClass" value="person"> person</label>
-            <label><input type="checkbox" name="filterClass" value="dog"> dog</label>
-            <label><input type="checkbox" name="filterClass" value="cat"> cat</label>
-            <label><input type="checkbox" name="filterClass" value="car"> car</label>
-            <label><input type="checkbox" name="filterClass" value="bus"> bus</label>
-            <label><input type="checkbox" name="filterClass" value="bicycle"> bicycle</label>
-            <label><input type="checkbox" name="filterClass" value="motorcycle"> motorcycle</label>
-          </div>
-          <button onclick="updateConfig()">✅ Update Config</button>
-        </div>
-      </section>
-      
-      <hr>
-      
-      <!-- Live Log Section as a Button Toggle -->
-      <section style="text-align: center;">
-        <h2>Live Detection Log</h2>
-        <button id="toggleLogButton" onclick="toggleLog()">Show Live Detection Log</button>
-        <div id="log" class="log-box">Loading logs...</div>
-      </section>
-      
-      <hr>
-      
-      <!-- Additional Links -->
-      <div style="text-align:center;">
-        <a href="/stream" target="_blank">View Live Stream</a> |
-        <a href="/feed" target="_blank">View Feed Panel</a>
+    <div id="map"></div>
+    <div id="panel">
+      <div class="controls">
+        <button onclick="startNavigation()">🧭 Start Navigation</button>
+        <button onclick="clearWaypoints()">❌ Clear Route</button>
+        <button onclick="alertObstacle()">🚧 Simulate Obstacle</button>
       </div>
+      <p>Tap the map to place waypoints. Smart Hat will guide you turn-by-turn with real-time voice assistance and obstacle detection.</p>
     </div>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initMap" async defer></script>
   </body>
 </html>
