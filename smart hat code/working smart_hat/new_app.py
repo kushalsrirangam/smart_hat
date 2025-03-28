@@ -55,7 +55,18 @@ SENSORS = {
 
 ultrasonic_readings = {}
 detection_active = True
-config_data = {"filter_classes": ["person"], "logging": True}
+config_data = {
+    "filter_classes": ["person"],
+    "logging": True,
+    "ultrasonic_thresholds": {
+        "Left Front": 70,
+        "Left Middle": 70,
+        "Left Rear": 70,
+        "Right Front": 70,
+        "Right Middle": 70,
+        "Right Rear": 70
+    }
+}
 
 os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -90,6 +101,8 @@ def measure_distance(h, trigger_pin, echo_pin, timeout=0.02):
         return "Out of Range"
     return round(distance, 2)
 
+last_ultra_speak_time = {}
+
 def ultrasonic_loop():
     global ultrasonic_readings
     h = lgpio.gpiochip_open(CHIP)
@@ -99,9 +112,19 @@ def ultrasonic_loop():
     try:
         while True:
             readings = {}
+            now = time.time()
             for name, sensor in SENSORS.items():
                 dist = measure_distance(h, sensor["trigger"], sensor["echo"])
                 readings[name] = dist
+
+                threshold = config_data.get("ultrasonic_thresholds", {}).get(name, 100)
+                if voice_alert_enabled and isinstance(dist, (int, float)) and dist < threshold:
+                    last_spoken = last_ultra_speak_time.get(name, 0)
+                    if now - last_spoken > 3:
+                        side = "left" if "Left" in name else "right"
+                        push_message_to_clients(f"Obstacle on {side} at {dist} centimeters")
+                        last_ultra_speak_time[name] = now
+
             ultrasonic_readings = readings
             time.sleep(0.2)
     except Exception as e:
@@ -122,7 +145,6 @@ def detection_loop():
     output_details = interpreter.get_output_details()
 
     picam2 = Picamera2()
-
     camera_config = picam2.create_preview_configuration(
         main={"size": normalSize, "format": "RGB888"},
         lores={"size": lowresSize, "format": "RGB888"}
@@ -138,7 +160,6 @@ def detection_loop():
 
             frame = picam2.capture_array("main")
             lores = picam2.capture_array("lores")
-
             resized = cv2.resize(lores, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
             input_tensor = np.expand_dims(resized, axis=0)
             interpreter.set_tensor(input_details[0]['index'], input_tensor)
@@ -158,7 +179,6 @@ def detection_loop():
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-                    # Example push message
                     if voice_alert_enabled:
                         push_message_to_clients(f"{label} detected ahead")
 
@@ -174,34 +194,6 @@ def detection_loop():
 
 @app.route("/")
 def index():
-    return redirect("/control_panel")
-
-@app.route('/favicon.ico')
-def favicon():
-    return send_from_directory(os.path.join(app.root_path, 'static'), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
-
-@app.route('/manifest.json')
-def manifest():
-    return send_from_directory('static', 'manifest.json')
-
-@app.route('/service-worker.js')
-def service_worker():
-    return send_from_directory('static', 'service-worker.js')
-
-@app.route('/video_feed')
-def video_feed():
-    def generate():
-        while True:
-            with frame_lock:
-                if latest_frame is None:
-                    continue
-                frame = latest_frame
-            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.5)
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/feed')
-def feed_panel():
     return redirect("/control_panel")
 
 @app.route('/control_panel')
@@ -249,20 +241,10 @@ def update_config():
         json.dump(config_data, f)
     return jsonify({"status": "Configuration updated", "config": config_data})
 
-@app.route('/log', methods=['GET'])
-def get_log():
-    try:
-        logs = db.collection('detections').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(10).stream()
-        log_list = [json.dumps(log.to_dict()) for log in logs]
-        return jsonify(log_list[::-1])
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
 @app.route('/speak', methods=['POST'])
 def speak_message():
     message = request.json.get("message", "")
     print(f"[TTS] Message: {message}")
-    # Echo to browser
     push_message_to_clients(message)
     return jsonify({"status": "spoken", "message": message})
 
