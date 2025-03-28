@@ -1,4 +1,3 @@
-<!-- Full control_panel.html with integrated UI + Battery/Sensor Health + Wi-Fi Reset -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -13,27 +12,34 @@
       background: #0a0a0a;
       color: #00ffc8;
     }
-    #map {
-      height: 50vh;
-      width: 100%;
-      filter: grayscale(20%) brightness(90%) contrast(120%);
-    }
-    .container {
-      padding: 20px;
-      background: #121212;
-    }
-    .controls, .dropdowns {
+    nav {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      margin: 10px 0;
+      justify-content: space-around;
+      background: #121212;
+      border-bottom: 1px solid #00ffc8;
     }
-    button, select, input[type="text"] {
+    nav button {
+      flex: 1;
+      padding: 14px;
+      font-size: 16px;
+      background: none;
+      border: none;
+      color: #00ffc8;
+      cursor: pointer;
+    }
+    .section {
+      display: none;
+      padding: 20px;
+    }
+    .active {
+      display: block;
+    }
+    button, select, input[type="text"], input[type="range"] {
       padding: 12px;
       font-size: 16px;
       border-radius: 10px;
       border: none;
+      margin: 5px 0;
     }
     button {
       background: #00ffc8;
@@ -41,260 +47,96 @@
       cursor: pointer;
       box-shadow: 0 0 10px rgba(0,255,200,0.5);
     }
-    input[type="text"] {
-      width: 60%;
+    #map {
+      height: 40vh;
+      width: 100%;
+      margin-bottom: 10px;
     }
-    .log-box {
-      background: #fff;
-      color: #000;
-      padding: 10px;
-      border-radius: 8px;
-      margin-top: 15px;
-      display: none;
-    }
-    .status-box {
+    .log-box, .status-box {
       background: #1a1a1a;
       padding: 10px;
       border-radius: 8px;
-      margin: 10px auto;
-      width: 90%;
-      text-align: center;
+      margin-top: 10px;
     }
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="container">
-    <div class="controls">
-      <h3>🔧 Ultrasonic Thresholds (cm)</h3>
-      <div>
-        <label>Left Front: <input type="range" id="lf" min="10" max="150" value="70" oninput="updateLabel('lf')"> <span id="lf_val">70</span></label><br>
-        <label>Left Middle: <input type="range" id="lm" min="10" max="150" value="70" oninput="updateLabel('lm')"> <span id="lm_val">70</span></label><br>
-        <label>Left Rear: <input type="range" id="lr" min="10" max="150" value="70" oninput="updateLabel('lr')"> <span id="lr_val">70</span></label><br>
-        <label>Right Front: <input type="range" id="rf" min="10" max="150" value="70" oninput="updateLabel('rf')"> <span id="rf_val">70</span></label><br>
-        <label>Right Middle: <input type="range" id="rm" min="10" max="150" value="70" oninput="updateLabel('rm')"> <span id="rm_val">70</span></label><br>
-        <label>Right Rear: <input type="range" id="rr" min="10" max="150" value="70" oninput="updateLabel('rr')"> <span id="rr_val">70</span></label><br>
-      </div>
-      <button onclick="applyThresholds()">Save Thresholds</button>
-    </div>
+  <nav>
+    <button onclick="switchSection('nav')">🗺️ Navigation</button>
+    <button onclick="switchSection('detect')">🎯 Detection</button>
+    <button onclick="switchSection('sensor')">📏 Sensors</button>
+    <button onclick="switchSection('system')">🧠 System</button>
+    <button onclick="switchSection('voice')">🔊 Voice</button>
+  </nav>
 
-    <div class="controls">
-      <input type="text" id="destinationInput" placeholder="Search destination...">
-      <button onclick="startVoiceSearch()">🎙 Voice</button>
-      <button onclick="toggleVoice()" id="voiceToggle">🔊 Voice ON</button>
-    </div>
-
-    <div class="controls">
-      <button onclick="startDetection()">🟢 Start</button>
-      <button onclick="stopDetection()">🔴 Stop</button>
-      <button onclick="checkStatus()">📊 Status</button>
-      <button onclick="toggleLog()">📄 Logs</button>
-    </div>
-
-    <div class="controls">
-      <select id="objectClassSelect">
-        <option value="person">person</option>
-        <option value="dog">dog</option>
-        <option value="cat">cat</option>
-        <option value="car">car</option>
-        <option value="bus">bus</option>
-        <option value="bicycle">bicycle</option>
-        <option value="motorcycle">motorcycle</option>
-        <option value="truck">truck</option>
-        <option value="traffic light">traffic light</option>
-        <option value="stop sign">stop sign</option>
-      </select>
-      <button onclick="updateConfig()">✅ Apply</button>
-    </div>
-
-    <div class="controls">
-      <input type="text" id="voiceInput" placeholder="Enter a message">
-      <button onclick="sendVoice()">📢 Speak</button>
-    </div>
-
-    <div class="controls">
+  <div id="nav" class="section active">
+    <div id="map"></div>
+    <input type="text" id="destinationInput" placeholder="Search destination...">
+    <button onclick="startVoiceSearch()">🎙 Voice</button>
+    <div>
       <button onclick="goTo('Target')">🏬 Target</button>
       <button onclick="goTo('Walmart')">🛒 Walmart</button>
       <button onclick="goTo('Pharmacy')">💊 Pharmacy</button>
     </div>
+  </div>
 
+  <div id="detect" class="section">
+    <button onclick="startDetection()">🟢 Start</button>
+    <button onclick="stopDetection()">🔴 Stop</button>
+    <select id="objectClassSelect">
+      <option value="person">person</option>
+      <option value="dog">dog</option>
+      <option value="cat">cat</option>
+      <option value="car">car</option>
+      <option value="bus">bus</option>
+      <option value="bicycle">bicycle</option>
+      <option value="motorcycle">motorcycle</option>
+      <option value="truck">truck</option>
+      <option value="traffic light">traffic light</option>
+      <option value="stop sign">stop sign</option>
+    </select>
+    <button onclick="updateConfig()">✅ Apply</button>
+    <button onclick="toggleVoice()" id="voiceToggle">🔊 Voice ON</button>
+  </div>
+
+  <div id="sensor" class="section">
+    <h3>🔧 Ultrasonic Thresholds (cm)</h3>
+    <label>Left Front: <input type="range" id="lf" min="10" max="150" value="70" oninput="updateLabel('lf')"> <span id="lf_val">70</span></label><br>
+    <label>Left Middle: <input type="range" id="lm" min="10" max="150" value="70" oninput="updateLabel('lm')"> <span id="lm_val">70</span></label><br>
+    <label>Left Rear: <input type="range" id="lr" min="10" max="150" value="70" oninput="updateLabel('lr')"> <span id="lr_val">70</span></label><br>
+    <label>Right Front: <input type="range" id="rf" min="10" max="150" value="70" oninput="updateLabel('rf')"> <span id="rf_val">70</span></label><br>
+    <label>Right Middle: <input type="range" id="rm" min="10" max="150" value="70" oninput="updateLabel('rm')"> <span id="rm_val">70</span></label><br>
+    <label>Right Rear: <input type="range" id="rr" min="10" max="150" value="70" oninput="updateLabel('rr')"> <span id="rr_val">70</span></label><br>
+    <button onclick="applyThresholds()">Save Thresholds</button>
+  </div>
+
+  <div id="system" class="section">
+    <button onclick="checkStatus()">📊 Check Status</button>
+    <button onclick="toggleLog()">📄 Logs</button>
+    <button onclick="resetWiFi()">🔄 Reset Wi-Fi</button>
     <div id="statusPanel" class="status-box">
       🔋 Battery: <span id="batteryLevel">--</span>% | 🧠 Health: <span id="healthStatus">--</span>
     </div>
-
-    <div id="log" class="log-box">Loading...</div>
-
-    <div style="text-align:center; margin-top: 10px;">
+    <div id="log" class="log-box" style="display:none">Loading...</div>
+    <div style="margin-top: 10px">
       <a href="/video_feed" target="_blank">📹 Live Stream</a> |
-      <a href="/feed" target="_blank">📡 Feed Panel</a> |
-      <button onclick="resetWiFi()">🔄 Reset Wi-Fi</button>
+      <a href="/feed" target="_blank">📡 Feed Panel</a>
     </div>
   </div>
 
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <div id="voice" class="section">
+    <input type="text" id="voiceInput" placeholder="Enter a message">
+    <button onclick="sendVoice()">📢 Speak</button>
+  </div>
+
   <script>
-    let map, directionsService, directionsRenderer, logInterval;
-    let voiceEnabled = true;
-    const socket = io();
-
-    socket.on('speak', (data) => {
-      console.log("[Socket Message]", data.message);
-      speak(data.message);
-    });
-
-    function updateLabel(id) {
-      document.getElementById(id + '_val').textContent = document.getElementById(id).value;
-    }
-
-    function applyThresholds() {
-      const thresholds = {
-        "Left Front": parseInt(document.getElementById('lf').value),
-        "Left Middle": parseInt(document.getElementById('lm').value),
-        "Left Rear": parseInt(document.getElementById('lr').value),
-        "Right Front": parseInt(document.getElementById('rf').value),
-        "Right Middle": parseInt(document.getElementById('rm').value),
-        "Right Rear": parseInt(document.getElementById('rr').value)
-      };
-
-      fetch('/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ultrasonic_thresholds: thresholds })
-      }).then(res => res.json())
-        .then(data => alert("Thresholds saved successfully!"));
-    }
-
-    function resetWiFi() {
-      fetch('/reset_wifi', { method: 'POST' })
-        .then(res => res.json())
-        .then(data => alert(data.message));
-    }
-
-    function checkStatus() {
-      fetch('/status')
-        .then(r => r.json())
-        .then(data => {
-          document.getElementById("batteryLevel").textContent = data.battery + "%";
-          document.getElementById("healthStatus").textContent = data.health;
-        });
-    }
-
-    function startDetection() { fetch('/start', { method: 'POST' }); }
-    function stopDetection() { fetch('/stop', { method: 'POST' }); }
-
-    function sendVoice() {
-      const msg = document.getElementById("voiceInput").value;
-      fetch('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg })
-      }).then(res => res.json())
-        .then(data => speak(data.message));
-    }
-
-    function updateConfig() {
-      const cls = document.getElementById("objectClassSelect").value;
-      fetch('/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filter_classes: [cls], logging: true })
-      });
-    }
-
-    function speakInstructions(steps) {
-      steps.forEach((step, i) => {
-        setTimeout(() => voiceEnabled && speak(step.instructions.replace(/<[^>]*>/g, '')), i * 6000);
-      });
-    }
-
-    function speak(text) {
-      if ('speechSynthesis' in window)
-        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-    }
-
-    function toggleVoice() {
-      voiceEnabled = !voiceEnabled;
-      document.getElementById("voiceToggle").textContent = voiceEnabled ? "🔊 Voice ON" : "🔇 Voice OFF";
-      fetch('/voice_alert_toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: voiceEnabled })
-      });
-    }
-
-    function toggleLog() {
-      const logBox = document.getElementById("log");
-      if (logBox.style.display === "none") {
-        logBox.style.display = "block";
-        loadLog();
-        logInterval = setInterval(loadLog, 5000);
-      } else {
-        logBox.style.display = "none";
-        clearInterval(logInterval);
-      }
-    }
-
-    function loadLog() {
-      fetch('/log')
-        .then(r => r.json())
-        .then(data => document.getElementById("log").innerHTML = data.reverse().join("<br>"));
-    }
-
-    function initMap() {
-      navigator.geolocation.getCurrentPosition(pos => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        map = new google.maps.Map(document.getElementById("map"), {
-          center: loc, zoom: 14
-        });
-        directionsService = new google.maps.DirectionsService();
-        directionsRenderer = new google.maps.DirectionsRenderer({ map: map });
-
-        const input = document.getElementById("destinationInput");
-        const autocomplete = new google.maps.places.Autocomplete(input);
-        autocomplete.addListener("place_changed", () => {
-          const place = autocomplete.getPlace();
-          if (place.geometry) navigateTo(place.geometry.location);
-        });
-
-        startDetection();
-      });
-    }
-
-    function navigateTo(destination) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        directionsService.route({
-          origin: { lat: pos.coords.latitude, lng: pos.coords.longitude },
-          destination: destination,
-          travelMode: google.maps.TravelMode.WALKING
-        }, (res, status) => {
-          if (status === "OK") {
-            directionsRenderer.setDirections(res);
-            speakInstructions(res.routes[0].legs.flatMap(leg => leg.steps));
-          }
-        });
-      });
-    }
-
-    function goTo(place) {
-      document.getElementById("destinationInput").value = place;
-      const service = new google.maps.places.PlacesService(map);
-      service.findPlaceFromQuery({ query: place, fields: ["geometry"] }, (results, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && results[0])
-          navigateTo(results[0].geometry.location);
-      });
-    }
-
-    function startVoiceSearch() {
-      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-      recognition.lang = 'en-US';
-      recognition.start();
-      recognition.onresult = e => {
-        const text = e.results[0][0].transcript;
-        document.getElementById("destinationInput").value = text;
-        goTo(text);
-      };
+    function switchSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
     }
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initMap" async defer></script>
+  <!-- Original script content from your app should go below -->
 </body>
 </html>
