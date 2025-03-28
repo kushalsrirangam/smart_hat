@@ -12,6 +12,8 @@ import time
 import lgpio
 import psutil
 import requests
+import signal
+import shutil
 
 # --- Firebase Admin Setup ---
 import firebase_admin
@@ -25,36 +27,13 @@ db = firestore.client()
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Paths & Configurations
 CONFIG_FILE = "/home/ada/de/detection/config.json"
-MODEL_PATH = "/home/ada/de/mobilenet_v2.tflite"
-LABEL_PATH = "/home/ada/de/coco_labels.txt"
-PANEL_PATH = "/home/ada/de/app_server"
-VIDEO_LOG_DIR = "/home/ada/de/videolog"
 LOG_DIR = "/home/ada/de/logs"
-UNIFIED_LOG_FILE = f"{LOG_DIR}/unified_log.csv"
 
-normalSize = (2028, 1520)
-lowresSize = (300, 300)
-latest_frame = None
-frame_lock = threading.Lock()
-
-DETECTION_THRESHOLD_CM = 10
-TTS_ENDPOINT = "http://localhost:5000/speak"
 voice_alert_enabled = True
-
-CHIP = 4
-SENSORS = {
-    "Left Front":  {"trigger": 4,  "echo": 17},
-    "Left Middle": {"trigger": 27, "echo": 22},
-    "Left Rear":   {"trigger": 23, "echo": 24},
-    "Right Front": {"trigger": 5,  "echo": 6},
-    "Right Middle": {"trigger": 12, "echo": 13},
-    "Right Rear":   {"trigger": 19, "echo": 26}
-}
-
-ultrasonic_readings = {}
+health_status = "OK"
 detection_active = True
+
 config_data = {
     "filter_classes": ["person"],
     "logging": True,
@@ -68,202 +47,166 @@ config_data = {
     }
 }
 
-os.makedirs(VIDEO_LOG_DIR, exist_ok=True)
+SENSORS = {
+    "Left Front":  {"trigger": 4,  "echo": 17},
+    "Left Middle": {"trigger": 27, "echo": 22},
+    "Left Rear":   {"trigger": 23, "echo": 24},
+    "Right Front": {"trigger": 5,  "echo": 6},
+    "Right Middle": {"trigger": 12, "echo": 13},
+    "Right Rear":   {"trigger": 19, "echo": 26}
+}
+
+CHIP = 4
+ultrasonic_readings = {}
+last_ultra_speak_time = {}
+
 os.makedirs(LOG_DIR, exist_ok=True)
-if not os.path.exists(UNIFIED_LOG_FILE):
-    with open(UNIFIED_LOG_FILE, "w") as f:
-        f.write("timestamp,event_type,label,confidence,estimated_distance_cm,ultrasonic_cm,actual_distance_cm,sensor_side,FPS,CPU,MEM,TEMP,video_filename,action,issue\n")
 
-def read_label_file(file_path):
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-    return {int(line.split()[0]): line.strip().split(maxsplit=1)[1] for line in lines}
+# Utility
 
-def measure_distance(h, trigger_pin, echo_pin, timeout=0.02):
-    lgpio.gpio_write(h, trigger_pin, 1)
+def push_message_to_clients(message):
+    socketio.emit('speak', {'message': message})
+
+def measure_distance(h, trig, echo, timeout=0.02):
+    lgpio.gpio_write(h, trig, 1)
     time.sleep(0.00001)
-    lgpio.gpio_write(h, trigger_pin, 0)
-    start_time = time.time()
-    stop_time = time.time()
+    lgpio.gpio_write(h, trig, 0)
+    start = time.time()
     timeout_start = time.time()
-    while lgpio.gpio_read(h, echo_pin) == 0:
-        start_time = time.time()
+    while lgpio.gpio_read(h, echo) == 0:
+        start = time.time()
         if time.time() - timeout_start > timeout:
             return "No Echo"
     timeout_start = time.time()
-    while lgpio.gpio_read(h, echo_pin) == 1:
-        stop_time = time.time()
+    while lgpio.gpio_read(h, echo) == 1:
+        stop = time.time()
         if time.time() - timeout_start > timeout:
             return "Echo Timeout"
-    time_elapsed = stop_time - start_time
-    distance = (time_elapsed * 34300) / 2
-    if distance <= 2 or distance > 400:
-        return "Out of Range"
-    return round(distance, 2)
+    elapsed = stop - start
+    distance = (elapsed * 34300) / 2
+    return round(distance, 2) if 2 < distance < 400 else "Out of Range"
 
-last_ultra_speak_time = {}
+# Background: Sensor + Battery Monitor
 
 def ultrasonic_loop():
-    global ultrasonic_readings
+    global ultrasonic_readings, health_status
     h = lgpio.gpiochip_open(CHIP)
-    for sensor in SENSORS.values():
-        lgpio.gpio_claim_output(h, sensor["trigger"])
-        lgpio.gpio_claim_input(h, sensor["echo"])
+    for s in SENSORS.values():
+        lgpio.gpio_claim_output(h, s["trigger"])
+        lgpio.gpio_claim_input(h, s["echo"])
     try:
         while True:
-            readings = {}
             now = time.time()
-            for name, sensor in SENSORS.items():
-                dist = measure_distance(h, sensor["trigger"], sensor["echo"])
+            failed = []
+            readings = {}
+            for name, pin in SENSORS.items():
+                dist = measure_distance(h, pin["trigger"], pin["echo"])
                 readings[name] = dist
-
                 threshold = config_data.get("ultrasonic_thresholds", {}).get(name, 100)
-                if voice_alert_enabled and isinstance(dist, (int, float)) and dist < threshold:
-                    last_spoken = last_ultra_speak_time.get(name, 0)
-                    if now - last_spoken > 3:
-                        side = "left" if "Left" in name else "right"
-                        push_message_to_clients(f"Obstacle on {side} at {dist} centimeters")
+                if isinstance(dist, (int, float)) and dist < threshold:
+                    if voice_alert_enabled and now - last_ultra_speak_time.get(name, 0) > 4:
+                        push_message_to_clients(f"Obstacle on {'left' if 'Left' in name else 'right'} at {dist} cm")
                         last_ultra_speak_time[name] = now
-
+                        # vibration feedback skipped (no motor hardware connected)
+                elif isinstance(dist, str):
+                    failed.append(name)
             ultrasonic_readings = readings
-            time.sleep(0.2)
+            health_status = "OK" if not failed else f"Sensor fault: {', '.join(failed)}"
+            time.sleep(1)
     except Exception as e:
         print("[Ultrasonic Error]", e)
     finally:
         lgpio.gpiochip_close(h)
 
-def push_message_to_clients(message):
-    socketio.emit('speak', {'message': message})
+def battery_monitor():
+    warned = False
+    while True:
+        battery = psutil.sensors_battery()
+        percent = battery.percent if battery else 100
+        if percent <= 20 and not warned:
+            push_message_to_clients("Battery low. Please charge Smart Hat.")
+            warned = True
+        if percent > 30:
+            warned = False
+        time.sleep(60)
+
+# Detection placeholder
 
 def detection_loop():
-    global latest_frame, detection_active
+    while True:
+        if not detection_active:
+            time.sleep(1)
+            continue
+        # AI detection code can be added here
+        time.sleep(0.2)
 
-    labels = read_label_file(LABEL_PATH)
-    interpreter = tflite.Interpreter(model_path=MODEL_PATH)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-
-    picam2 = Picamera2()
-    camera_config = picam2.create_preview_configuration(
-        main={"size": normalSize, "format": "RGB888"},
-        lores={"size": lowresSize, "format": "RGB888"}
-    )
-    picam2.configure(camera_config)
-    picam2.start()
-
-    try:
-        while True:
-            if not detection_active:
-                time.sleep(0.5)
-                continue
-
-            frame = picam2.capture_array("main")
-            lores = picam2.capture_array("lores")
-            resized = cv2.resize(lores, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
-            input_tensor = np.expand_dims(resized, axis=0)
-            interpreter.set_tensor(input_details[0]['index'], input_tensor)
-            interpreter.invoke()
-
-            boxes = interpreter.get_tensor(output_details[0]['index'])[0]
-            classes = interpreter.get_tensor(output_details[1]['index'])[0]
-            scores = interpreter.get_tensor(output_details[2]['index'])[0]
-
-            for i in range(len(scores)):
-                if scores[i] > 0.5:
-                    ymin, xmin, ymax, xmax = boxes[i]
-                    class_id = int(classes[i])
-                    label = labels.get(class_id, f"id:{class_id}")
-                    x1, y1 = int(xmin * normalSize[0]), int(ymin * normalSize[1])
-                    x2, y2 = int(xmax * normalSize[0]), int(ymax * normalSize[1])
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-                    if voice_alert_enabled:
-                        push_message_to_clients(f"{label} detected ahead")
-
-            ret, jpeg = cv2.imencode('.jpg', frame)
-            if ret:
-                with frame_lock:
-                    latest_frame = jpeg.tobytes()
-
-    except Exception as e:
-        print(f"[Detection Error] {e}")
-    finally:
-        picam2.stop()
+# Flask routes
 
 @app.route("/")
 def index():
     return redirect("/control_panel")
 
-@app.route('/control_panel')
+@app.route("/control_panel")
 def control_panel():
-    try:
-        with open(os.path.join(PANEL_PATH, "control_panel.html"), "r") as f:
-            html = f.read()
-        return render_template_string(html)
-    except Exception as e:
-        return f"Error loading control panel: {e}"
+    return "Smart Hat UI Loaded"
 
-@app.route('/start', methods=['POST'])
+@app.route("/status")
+def get_status():
+    battery = psutil.sensors_battery()
+    return jsonify({
+        "battery": battery.percent if battery else -1,
+        "health": health_status,
+        "detection_active": detection_active
+    })
+
+@app.route("/start", methods=["POST"])
 def start_detection():
     global detection_active
     detection_active = True
     return jsonify({"status": "Detection started"})
 
-@app.route('/stop', methods=['POST'])
+@app.route("/stop", methods=["POST"])
 def stop_detection():
     global detection_active
     detection_active = False
     return jsonify({"status": "Detection stopped"})
 
-@app.route('/status', methods=['GET'])
-def status():
-    return jsonify({"detection_active": detection_active})
-
-@app.route('/voice_alert_toggle', methods=['POST'])
-def alias_voice_toggle():
-    return toggle_voice_alert()
-
-@app.route('/voice_alert', methods=['POST'])
-def toggle_voice_alert():
+@app.route("/voice_alert_toggle", methods=["POST"])
+def voice_toggle():
     global voice_alert_enabled
-    data = request.get_json()
-    voice_alert_enabled = data.get("enabled", True)
+    voice_alert_enabled = request.json.get("enabled", True)
     return jsonify({"voice_alert_enabled": voice_alert_enabled})
 
-@app.route('/config', methods=['POST'])
+@app.route("/config", methods=["POST"])
 def update_config():
     global config_data
     data = request.get_json()
     config_data.update(data)
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, "w") as f:
         json.dump(config_data, f)
-    return jsonify({"status": "Configuration updated", "config": config_data})
+    return jsonify({"status": "config updated", "config": config_data})
 
-@app.route('/speak', methods=['POST'])
-def speak_message():
-    message = request.json.get("message", "")
-    print(f"[TTS] Message: {message}")
-    push_message_to_clients(message)
-    return jsonify({"status": "spoken", "message": message})
+@app.route("/speak", methods=["POST"])
+def speak():
+    msg = request.json.get("message", "")
+    push_message_to_clients(msg)
+    return jsonify({"status": "spoken", "message": msg})
 
-def start_ngrok():
+@app.route("/reset_wifi", methods=["POST"])
+def reset_wifi():
     try:
-        process = subprocess.Popen(["ngrok", "http", "5000"])
-        print("[NGROK] Tunnel started at http://localhost:4040")
-        return process
-    except FileNotFoundError:
-        print("[NGROK] Ngrok not found. Make sure it's installed and in PATH.")
-        return None
+        config_path = "/etc/wpa_supplicant/wpa_supplicant.conf"
+        backup_path = f"{config_path}.bak"
+        if os.path.exists(config_path):
+            shutil.move(config_path, backup_path)
+        os.system("sudo reboot")
+        return jsonify({"message": "Wi-Fi reset. Rebooting..."})
+    except Exception as e:
+        return jsonify({"message": f"Failed: {e}"})
 
+# Threads
 if __name__ == '__main__':
-    ngrok_proc = start_ngrok()
-    try:
-        threading.Thread(target=ultrasonic_loop, daemon=True).start()
-        threading.Thread(target=detection_loop, daemon=True).start()
-        socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
-    finally:
-        if ngrok_proc:
-            ngrok_proc.terminate()
-            print("[NGROK] Process terminated")
+    threading.Thread(target=ultrasonic_loop, daemon=True).start()
+    threading.Thread(target=battery_monitor, daemon=True).start()
+    threading.Thread(target=detection_loop, daemon=True).start()
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
