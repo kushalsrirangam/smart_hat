@@ -1,4 +1,4 @@
-<!-- Full control_panel.html with integrated UI -->
+<!-- Full control_panel.html with integrated UI + Battery/Sensor Health + Wi-Fi Reset -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -51,6 +51,14 @@
       border-radius: 8px;
       margin-top: 15px;
       display: none;
+    }
+    .status-box {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 10px auto;
+      width: 90%;
+      text-align: center;
     }
   </style>
 </head>
@@ -110,11 +118,16 @@
       <button onclick="goTo('Pharmacy')">💊 Pharmacy</button>
     </div>
 
+    <div id="statusPanel" class="status-box">
+      🔋 Battery: <span id="batteryLevel">--</span>% | 🧠 Health: <span id="healthStatus">--</span>
+    </div>
+
     <div id="log" class="log-box">Loading...</div>
 
     <div style="text-align:center; margin-top: 10px;">
       <a href="/video_feed" target="_blank">📹 Live Stream</a> |
-      <a href="/feed" target="_blank">📡 Feed Panel</a>
+      <a href="/feed" target="_blank">📡 Feed Panel</a> |
+      <button onclick="resetWiFi()">🔄 Reset Wi-Fi</button>
     </div>
   </div>
 
@@ -149,6 +162,82 @@
         body: JSON.stringify({ ultrasonic_thresholds: thresholds })
       }).then(res => res.json())
         .then(data => alert("Thresholds saved successfully!"));
+    }
+
+    function resetWiFi() {
+      fetch('/reset_wifi', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => alert(data.message));
+    }
+
+    function checkStatus() {
+      fetch('/status')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById("batteryLevel").textContent = data.battery + "%";
+          document.getElementById("healthStatus").textContent = data.health;
+        });
+    }
+
+    function startDetection() { fetch('/start', { method: 'POST' }); }
+    function stopDetection() { fetch('/stop', { method: 'POST' }); }
+
+    function sendVoice() {
+      const msg = document.getElementById("voiceInput").value;
+      fetch('/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg })
+      }).then(res => res.json())
+        .then(data => speak(data.message));
+    }
+
+    function updateConfig() {
+      const cls = document.getElementById("objectClassSelect").value;
+      fetch('/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filter_classes: [cls], logging: true })
+      });
+    }
+
+    function speakInstructions(steps) {
+      steps.forEach((step, i) => {
+        setTimeout(() => voiceEnabled && speak(step.instructions.replace(/<[^>]*>/g, '')), i * 6000);
+      });
+    }
+
+    function speak(text) {
+      if ('speechSynthesis' in window)
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+
+    function toggleVoice() {
+      voiceEnabled = !voiceEnabled;
+      document.getElementById("voiceToggle").textContent = voiceEnabled ? "🔊 Voice ON" : "🔇 Voice OFF";
+      fetch('/voice_alert_toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: voiceEnabled })
+      });
+    }
+
+    function toggleLog() {
+      const logBox = document.getElementById("log");
+      if (logBox.style.display === "none") {
+        logBox.style.display = "block";
+        loadLog();
+        logInterval = setInterval(loadLog, 5000);
+      } else {
+        logBox.style.display = "none";
+        clearInterval(logInterval);
+      }
+    }
+
+    function loadLog() {
+      fetch('/log')
+        .then(r => r.json())
+        .then(data => document.getElementById("log").innerHTML = data.reverse().join("<br>"));
     }
 
     function initMap() {
@@ -204,68 +293,6 @@
         document.getElementById("destinationInput").value = text;
         goTo(text);
       };
-    }
-
-    function speakInstructions(steps) {
-      steps.forEach((step, i) => {
-        setTimeout(() => voiceEnabled && speak(step.instructions.replace(/<[^>]*>/g, '')), i * 6000);
-      });
-    }
-
-    function speak(text) {
-      if ('speechSynthesis' in window)
-        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-    }
-
-    function toggleVoice() {
-      voiceEnabled = !voiceEnabled;
-      document.getElementById("voiceToggle").textContent = voiceEnabled ? "🔊 Voice ON" : "🔇 Voice OFF";
-      fetch('/voice_alert_toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: voiceEnabled })
-      });
-    }
-
-    function startDetection() { fetch('/start', { method: 'POST' }); }
-    function stopDetection() { fetch('/stop', { method: 'POST' }); }
-    function checkStatus() { fetch('/status').then(r => r.json()).then(console.log); }
-
-    function sendVoice() {
-      const msg = document.getElementById("voiceInput").value;
-      fetch('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg })
-      }).then(res => res.json())
-        .then(data => speak(data.message));
-    }
-
-    function updateConfig() {
-      const cls = document.getElementById("objectClassSelect").value;
-      fetch('/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filter_classes: [cls], logging: true })
-      });
-    }
-
-    function toggleLog() {
-      const logBox = document.getElementById("log");
-      if (logBox.style.display === "none") {
-        logBox.style.display = "block";
-        loadLog();
-        logInterval = setInterval(loadLog, 5000);
-      } else {
-        logBox.style.display = "none";
-        clearInterval(logInterval);
-      }
-    }
-
-    function loadLog() {
-      fetch('/log')
-        .then(r => r.json())
-        .then(data => document.getElementById("log").innerHTML = data.reverse().join("<br>"));
     }
   </script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
