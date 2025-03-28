@@ -16,11 +16,14 @@ import requests
 # --- Firebase Admin Setup ---
 import firebase_admin
 from firebase_admin import credentials, firestore
+from flask_socketio import SocketIO, emit
+
 cred = credentials.Certificate('/home/ada/de/smartaid-6c5c0-firebase-adminsdk-fbsvc-cee03b08da.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Paths & Configurations
 CONFIG_FILE = "/home/ada/de/detection/config.json"
@@ -106,6 +109,9 @@ def ultrasonic_loop():
     finally:
         lgpio.gpiochip_close(h)
 
+def push_message_to_clients(message):
+    socketio.emit('speak', {'message': message})
+
 def detection_loop():
     global latest_frame, detection_active
 
@@ -151,6 +157,10 @@ def detection_loop():
                     x2, y2 = int(xmax * normalSize[0]), int(ymax * normalSize[1])
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+                    # Example push message
+                    if voice_alert_enabled:
+                        push_message_to_clients(f"{label} detected ahead")
 
             ret, jpeg = cv2.imencode('.jpg', frame)
             if ret:
@@ -252,6 +262,8 @@ def get_log():
 def speak_message():
     message = request.json.get("message", "")
     print(f"[TTS] Message: {message}")
+    # Echo to browser
+    push_message_to_clients(message)
     return jsonify({"status": "spoken", "message": message})
 
 def start_ngrok():
@@ -268,8 +280,6 @@ if __name__ == '__main__':
     try:
         threading.Thread(target=ultrasonic_loop, daemon=True).start()
         threading.Thread(target=detection_loop, daemon=True).start()
-        from flask_socketio import SocketIO
-        socketio = SocketIO(app)
         socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True, use_reloader=False)
     finally:
         if ngrok_proc:
