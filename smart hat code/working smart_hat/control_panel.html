@@ -1,155 +1,330 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Smart Hat - Control Panel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
-  <style>
-    body {
-      font-family: 'Orbitron', sans-serif;
-      margin: 0;
-      background: #0a0a0a;
-      color: #00ffc8;
-    }
-    nav {
-      display: flex;
-      justify-content: space-around;
-      background: #121212;
-      border-bottom: 1px solid #00ffc8;
-    }
-    nav button {
-      flex: 1;
-      padding: 14px;
-      font-size: 16px;
-      background: none;
-      border: none;
-      color: #00ffc8;
-      cursor: pointer;
-    }
-    .section {
-      display: none;
-      padding: 20px;
-    }
-    .active {
-      display: block;
-    }
-    button, select, input[type="text"], input[type="range"] {
-      padding: 12px;
-      font-size: 16px;
-      border-radius: 10px;
-      border: none;
-      margin: 5px 0;
-    }
-    button {
-      background: #00ffc8;
-      color: #000;
-      cursor: pointer;
-      box-shadow: 0 0 10px rgba(0,255,200,0.5);
-    }
-    #map {
-      height: 40vh;
-      width: 100%;
-      margin-bottom: 10px;
-    }
-    .log-box, .status-box {
-      background: #1a1a1a;
-      padding: 10px;
-      border-radius: 8px;
-      margin-top: 10px;
-    }
-  </style>
-</head>
-<body>
-  <nav>
-    <button onclick="switchSection('dashboard')">📊 Dashboard</button>
-    <button onclick="switchSection('nav')">🗺️ Navigation</button>
-    <button onclick="switchSection('detect')">🎯 Detection</button>
-    <button onclick="switchSection('sensor')">📏 Sensors</button>
-    <button onclick="switchSection('system')">🧠 System</button>
-    <button onclick="switchSection('voice')">🔊 Voice</button>
-  </nav>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Hat - Control Panel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg-dark: #0a0a0a;
+        --primary: #00ffc8;
+        --accent: #00ff99;
+        --card-bg: #1a1a1a;
+        --text-color: #e0e0e0;
+        --shadow: rgba(0, 255, 200, 0.3);
+      }
+      body {
+        font-family: 'Orbitron', sans-serif;
+        margin: 0;
+        background-color: var(--bg-dark);
+        color: var(--text-color);
+      }
+      nav {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px;
+        background-color: #121212;
+        border-bottom: 2px solid var(--primary);
+        box-shadow: 0 2px 10px var(--shadow);
+      }
+      nav button {
+        flex: 1;
+        padding: 12px;
+        font-size: 15px;
+        font-weight: bold;
+        background: transparent;
+        border: none;
+        color: var(--primary);
+        cursor: pointer;
+        transition: background 0.2s, color 0.2s;
+      }
+      nav button:hover {
+        background-color: var(--accent);
+        color: #000;
+      }
+      .section {
+        display: none;
+        padding: 20px;
+        animation: fadeIn 0.3s ease-in-out;
+      }
+      .active {
+        display: block;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      button,
+      select,
+      input[type="text"],
+      input[type="range"] {
+        padding: 12px;
+        font-size: 15px;
+        border-radius: 8px;
+        border: none;
+        margin: 8px 0;
+        outline: none;
+      }
+      button {
+        background: var(--primary);
+        color: #000;
+        font-weight: bold;
+        box-shadow: 0 0 12px var(--shadow);
+      }
+      #map {
+        height: 50vh;
+        width: 100%;
+        border-radius: 10px;
+        box-shadow: 0 0 10px var(--shadow);
+      }
+      .log-box,
+      .status-box {
+        background: var(--card-bg);
+        padding: 14px;
+        border-radius: 10px;
+        box-shadow: 0 0 6px var(--shadow);
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Navigation bar for section switching -->
+    <nav>
+      <button onclick="switchSection('dashboard')">📊 Dashboard</button>
+      <button onclick="switchSection('nav')">🗺️ Navigation</button>
+      <button onclick="switchSection('detect')">🎯 Detection</button>
+      <button onclick="switchSection('sensor')">📏 Sensors</button>
+      <button onclick="switchSection('system')">🧠 System</button>
+      <button onclick="switchSection('voice')">🔊 Voice</button>
+    </nav>
 
-  <div id="dashboard" class="section active">
-    <h2>Welcome to Smart Hat Dashboard</h2>
-    <p>Use the tabs above to navigate features.</p>
-    <ul>
-      <li>Real-time Navigation and Directions</li>
-      <li>AI Object Detection and Alerts</li>
-      <li>Ultrasonic Sensor Thresholds</li>
-      <li>Battery Monitoring and System Health</li>
-      <li>Voice Command & Feedback</li>
-    </ul>
-  </div>
-
-  <div id="nav" class="section">
-    <div id="map"></div>
-    <input type="text" id="destinationInput" placeholder="Search destination...">
-    <button onclick="startVoiceSearch()">🎙 Voice</button>
-    <div>
-      <button onclick="goTo('Target')">🏬 Target</button>
-      <button onclick="goTo('Walmart')">🛒 Walmart</button>
-      <button onclick="goTo('Pharmacy')">💊 Pharmacy</button>
+    <!-- Dashboard section -->
+    <div id="dashboard" class="section active">
+      <h2>Welcome to Smart Hat Dashboard</h2>
+      <p>Use the tabs above to explore system features.</p>
+      <div class="status-box">
+        Motion: <span id="motionStatus">--</span>
+      </div>
     </div>
-  </div>
 
-  <div id="detect" class="section">
-    <button onclick="startDetection()">🟢 Start</button>
-    <button onclick="stopDetection()">🔴 Stop</button>
-    <select id="objectClassSelect">
-      <option value="person">person</option>
-      <option value="dog">dog</option>
-      <option value="cat">cat</option>
-      <option value="car">car</option>
-      <option value="bus">bus</option>
-      <option value="bicycle">bicycle</option>
-      <option value="motorcycle">motorcycle</option>
-      <option value="truck">truck</option>
-      <option value="traffic light">traffic light</option>
-      <option value="stop sign">stop sign</option>
-    </select>
-    <button onclick="updateConfig()">✅ Apply</button>
-    <button onclick="toggleVoice()" id="voiceToggle">🔊 Voice ON</button>
-  </div>
-
-  <div id="sensor" class="section">
-    <h3>🔧 Ultrasonic Thresholds (cm)</h3>
-    <label>Left Front: <input type="range" id="lf" min="10" max="150" value="70" oninput="updateLabel('lf')"> <span id="lf_val">70</span></label><br>
-    <label>Left Middle: <input type="range" id="lm" min="10" max="150" value="70" oninput="updateLabel('lm')"> <span id="lm_val">70</span></label><br>
-    <label>Left Rear: <input type="range" id="lr" min="10" max="150" value="70" oninput="updateLabel('lr')"> <span id="lr_val">70</span></label><br>
-    <label>Right Front: <input type="range" id="rf" min="10" max="150" value="70" oninput="updateLabel('rf')"> <span id="rf_val">70</span></label><br>
-    <label>Right Middle: <input type="range" id="rm" min="10" max="150" value="70" oninput="updateLabel('rm')"> <span id="rm_val">70</span></label><br>
-    <label>Right Rear: <input type="range" id="rr" min="10" max="150" value="70" oninput="updateLabel('rr')"> <span id="rr_val">70</span></label><br>
-    <button onclick="applyThresholds()">Save Thresholds</button>
-  </div>
-
-  <div id="system" class="section">
-    <button onclick="checkStatus()">📊 Check Status</button>
-    <button onclick="toggleLog()">📄 Logs</button>
-    <button onclick="resetWiFi()">🔄 Reset Wi-Fi</button>
-    <div id="statusPanel" class="status-box">
-      🔋 Battery: <span id="batteryLevel">--</span>% | 🧠 Health: <span id="healthStatus">--</span>
+    <!-- Navigation section with map and voice search -->
+    <div id="nav" class="section">
+      <div id="map"></div>
+      <input type="text" id="destinationInput" placeholder="Search destination..." />
+      <button onclick="startVoiceSearch()">🎙 Voice</button>
+      <div class="status-box">
+        Distance: <span id="distanceTravelled">0</span> m<br />
+        Speed: <span id="speed">0</span> km/h
+      </div>
     </div>
-    <div id="log" class="log-box" style="display:none">Loading...</div>
-    <div style="margin-top: 10px">
-      <a href="/video_feed" target="_blank">📹 Live Stream</a> |
-      <a href="/feed" target="_blank">📡 Feed Panel</a>
+
+    <!-- Object detection controls -->
+    <div id="detect" class="section">
+      <h3>Detection Controls</h3>
+      <button onclick="startDetection()">🟢 Start</button>
+      <button onclick="stopDetection()">🔴 Stop</button>
+      <select id="objectClassSelect">
+        <option value="person">person</option>
+        <option value="dog">dog</option>
+        <option value="car">car</option>
+      </select>
+      <button onclick="updateConfig()">✅ Apply</button>
     </div>
-  </div>
 
-  <div id="voice" class="section">
-    <input type="text" id="voiceInput" placeholder="Enter a message">
-    <button onclick="sendVoice()">📢 Speak</button>
-  </div>
+    <!-- Sensor threshold configuration -->
+    <div id="sensor" class="section">
+      <h3>Ultrasonic Thresholds (cm)</h3>
+      <label>Front: <input type="range" id="front" min="10" max="150" value="70" /></label><br />
+      <label>Back: <input type="range" id="back" min="10" max="150" value="70" /></label><br />
+      <button onclick="applyThresholds()">💾 Save Thresholds</button>
+        <!-- Live Video Feed embedded in sensors section -->
+      <div id="sensor-video" style="margin-top:20px;">
+    <h3>Live Video Feed</h3>
+    <img src="/video_feed" style="width:100%; border:none; border-radius:10px;" alt="Live Stream" />
+      </div>
+    </div>
+    
 
-  <script>
-    function switchSection(id) {
-      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      document.getElementById(id).classList.add('active');
-    }
-  </script>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initMap" async defer></script>
-  <!-- Original script content from your app should go below -->
-</body>
+    <!-- System tools and log viewer -->
+    <div id="system" class="section">
+      <h3>System Tools</h3>
+      <button onclick="checkStatus()">📊 Check Status</button>
+      <button onclick="toggleLog()">📄 Logs</button>
+      <div id="log" class="log-box" style="display:none">Loading...</div>
+    </div>
+
+    <!-- Manual voice command section -->
+    <div id="voice" class="section">
+      <h3>Custom Voice Command</h3>
+      <input type="text" id="voiceInput" placeholder="Say something..." />
+      <button onclick="sendVoice()">📢 Speak</button>
+    </div>
+
+    <script>
+      let map, directionsService, directionsRenderer, userLocation, watchId, routeSteps = [], currentStepIndex = 0, pathLine;
+      let trackingPaused = false; // Toggle pause/resume
+      const proximityThreshold = 25; // Adjustable threshold in meters
+      const pathHistory = []; // Stores all past positions
+
+      function switchSection(id) {
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+      }
+
+      function initMap() {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          userLocation = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          };
+          map = new google.maps.Map(document.getElementById("map"), {
+            center: userLocation,
+            zoom: 15
+          });
+          directionsService = new google.maps.DirectionsService();
+          directionsRenderer = new google.maps.DirectionsRenderer({ map });
+        });
+      }
+
+      function startVoiceSearch() {
+        const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = function (event) {
+          const voiceText = event.results[0][0].transcript.toLowerCase().trim();
+          console.log("Heard:", voiceText);
+
+          const flexiblePattern = /^hat(?:\s+(go to|navigate to|find|search for|take me to|head to|travel to|get directions to|directions to))?\s+(.+)$/;
+          const match = voiceText.match(flexiblePattern);
+
+          if (match && match[2]) {
+            const destination = match[2].trim();
+            document.getElementById("destinationInput").value = destination;
+            speak(`Getting directions to ${destination}`);
+            routeTo(destination);
+          } else {
+            speak("Please start your command with the word 'hat'.");
+          }
+        };
+
+        recognition.onerror = function (event) {
+          console.error("Voice recognition error:", event.error);
+          speak("Sorry, I didn't catch that. Try again.");
+        };
+
+        recognition.start();
+      }
+
+      function speak(message) {
+        const synth = window.speechSynthesis;
+        const utter = new SpeechSynthesisUtterance(message);
+        synth.speak(utter);
+      }
+
+      function routeTo(place) {
+        if (!map || !directionsService || !directionsRenderer || !userLocation) {
+          speak("Navigation services not ready yet.");
+          return;
+        }
+
+        const service = new google.maps.places.PlacesService(map);
+        service.findPlaceFromQuery({ query: place, fields: ["geometry", "name"] }, (results, status) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
+            const location = results[0].geometry.location;
+            const request = {
+              origin: userLocation,
+              destination: location,
+              travelMode: google.maps.TravelMode.WALKING
+            };
+            directionsService.route(request, function(result, status) {
+              if (status === google.maps.DirectionsStatus.OK) {
+                directionsRenderer.setDirections(result);
+                routeSteps = result.routes[0].legs[0].steps;
+                currentStepIndex = 0;
+                pathLine = new google.maps.Polyline({ path: [], map: map, strokeColor: '#00ffc8' });
+                startLiveTracking();
+              } else {
+                fallbackGeocode(place);
+              }
+            });
+          } else {
+            fallbackGeocode(place);
+          }
+        });
+      }
+
+      function fallbackGeocode(place) {
+        speak("Could not find directions. Showing location on map.");
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ address: place }, (res, geoStatus) => {
+          if (geoStatus === "OK" && res[0]) {
+            map.setCenter(res[0].geometry.location);
+            new google.maps.Marker({ map, position: res[0].geometry.location });
+          } else {
+            speak("Still couldn’t find that location.");
+          }
+        });
+      }
+
+      function startLiveTracking() {
+        if (navigator.geolocation) {
+          if (watchId) navigator.geolocation.clearWatch(watchId);
+          watchId = navigator.geolocation.watchPosition((pos) => {
+            if (trackingPaused) return;
+            const newPos = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude
+            };
+            userLocation = newPos;
+            map.setCenter(newPos);
+            new google.maps.Marker({ map, position: newPos });
+
+            const path = pathLine.getPath();
+            path.push(newPos);
+            pathHistory.push(newPos);
+            savePathToFirebase(newPos);
+
+            if (routeSteps.length && currentStepIndex < routeSteps.length) {
+              const step = routeSteps[currentStepIndex];
+              const stepPos = step.start_location;
+              const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(stepPos.lat(), stepPos.lng()),
+                new google.maps.LatLng(newPos.lat, newPos.lng)
+              );
+              if (distance < proximityThreshold) {
+                speak(step.instructions.replace(/<[^>]*>/g, ''));
+                currentStepIndex++;
+              }
+            }
+          }, (err) => {
+            console.error("Live tracking error:", err);
+            speak("Could not access your live location.");
+          }, { enableHighAccuracy: true });
+        } else {
+          speak("Geolocation is not supported by your browser.");
+        }
+      }
+
+      function toggleTracking() {
+        trackingPaused = !trackingPaused;
+        speak(trackingPaused ? "Navigation paused." : "Navigation resumed.");
+      }
+
+      function savePathToFirebase(position) {
+        fetch('/log_location', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ lat: position.lat, lng: position.lng, timestamp: Date.now() })
+        });
+      }
+    </script>
+
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
+  </body>
 </html>
