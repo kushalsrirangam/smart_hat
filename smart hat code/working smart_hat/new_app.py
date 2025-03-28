@@ -6,7 +6,7 @@ import threading
 import cv2
 import numpy as np
 import tflite_runtime.interpreter as tflite
-from picamera2 import Picamera2, Platform
+from picamera2 import Picamera2
 from datetime import datetime
 import time
 import lgpio
@@ -31,7 +31,7 @@ VIDEO_LOG_DIR = "/home/ada/de/videolog"
 LOG_DIR = "/home/ada/de/logs"
 UNIFIED_LOG_FILE = f"{LOG_DIR}/unified_log.csv"
 
-normalSize = (1920, 1080)
+normalSize = (2028, 1520)
 lowresSize = (300, 300)
 latest_frame = None
 frame_lock = threading.Lock()
@@ -64,11 +64,6 @@ def read_label_file(file_path):
     with open(file_path, 'r') as f:
         lines = f.readlines()
     return {int(line.split()[0]): line.strip().split(maxsplit=1)[1] for line in lines}
-
-def calculate_distance(actual_width, focal_length, bounding_box_width):
-    if bounding_box_width == 0:
-        return float('inf')
-    return (actual_width * focal_length) / bounding_box_width
 
 def measure_distance(h, trigger_pin, echo_pin, timeout=0.02):
     lgpio.gpio_write(h, trigger_pin, 1)
@@ -121,13 +116,10 @@ def detection_loop():
     output_details = interpreter.get_output_details()
 
     picam2 = Picamera2()
-    stream_format = "YUV420"
-    if Picamera2.platform == Platform.PISP:
-        stream_format = "RGB888"
 
     camera_config = picam2.create_preview_configuration(
-        main={"size": normalSize},
-        lores={"size": lowresSize, "format": stream_format}
+        main={"size": normalSize, "format": "RGB888"},
+        lores={"size": lowresSize, "format": "RGB888"}
     )
     picam2.configure(camera_config)
     picam2.start()
@@ -138,12 +130,11 @@ def detection_loop():
                 time.sleep(0.5)
                 continue
 
-            img = picam2.capture_array("lores")
-            if stream_format == "YUV420":
-                img = cv2.cvtColor(img, cv2.COLOR_YUV420p2RGB)
+            frame = picam2.capture_array("main")
+            lores = picam2.capture_array("lores")
 
-            resized_img = cv2.resize(img, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
-            input_tensor = np.expand_dims(resized_img, axis=0)
+            resized = cv2.resize(lores, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
+            input_tensor = np.expand_dims(resized, axis=0)
             interpreter.set_tensor(input_details[0]['index'], input_tensor)
             interpreter.invoke()
 
@@ -151,16 +142,17 @@ def detection_loop():
             classes = interpreter.get_tensor(output_details[1]['index'])[0]
             scores = interpreter.get_tensor(output_details[2]['index'])[0]
 
-            frame = picam2.capture_array("main")
-            output_frame = frame.copy()
             for i in range(len(scores)):
                 if scores[i] > 0.5:
                     ymin, xmin, ymax, xmax = boxes[i]
                     class_id = int(classes[i])
                     label = labels.get(class_id, f"id:{class_id}")
-                    cv2.putText(output_frame, label, (int(xmin*normalSize[0]), int(ymin*normalSize[1])), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                    x1, y1 = int(xmin * normalSize[0]), int(ymin * normalSize[1])
+                    x2, y2 = int(xmax * normalSize[0]), int(ymax * normalSize[1])
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-            ret, jpeg = cv2.imencode('.jpg', output_frame)
+            ret, jpeg = cv2.imencode('.jpg', frame)
             if ret:
                 with frame_lock:
                     latest_frame = jpeg.tobytes()
