@@ -62,6 +62,7 @@
 </head>
 <body>
   <nav>
+    <button onclick="switchSection('dashboard')">📊 Dashboard</button>
     <button onclick="switchSection('nav')">🗺️ Navigation</button>
     <button onclick="switchSection('detect')">🎯 Detection</button>
     <button onclick="switchSection('sensor')">📏 Sensors</button>
@@ -69,7 +70,19 @@
     <button onclick="switchSection('voice')">🔊 Voice</button>
   </nav>
 
-  <div id="nav" class="section active">
+  <div id="dashboard" class="section active">
+    <h2>Welcome to Smart Hat Dashboard</h2>
+    <p>Use the tabs above to navigate features.</p>
+    <ul>
+      <li>Real-time Navigation and Directions</li>
+      <li>AI Object Detection and Alerts</li>
+      <li>Ultrasonic Sensor Thresholds</li>
+      <li>Battery Monitoring and System Health</li>
+      <li>Voice Command & Feedback</li>
+    </ul>
+  </div>
+
+  <div id="nav" class="section">
     <div id="map"></div>
     <input type="text" id="destinationInput" placeholder="Search destination...">
     <button onclick="startVoiceSearch()">🎙 Voice</button>
