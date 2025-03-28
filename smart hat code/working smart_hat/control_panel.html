@@ -104,9 +104,16 @@
     </div>
   </div>
 
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
     let map, directionsService, directionsRenderer, logInterval;
     let voiceEnabled = true;
+    const socket = io();
+
+    socket.on('speak', (data) => {
+      console.log("[Socket Message]", data.message);
+      speak(data.message);
+    });
 
     function initMap() {
       navigator.geolocation.getCurrentPosition(pos => {
@@ -124,7 +131,6 @@
           if (place.geometry) navigateTo(place.geometry.location);
         });
 
-        // Auto-start detection
         startDetection();
       });
     }
@@ -171,7 +177,8 @@
     }
 
     function speak(text) {
-      if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      if ('speechSynthesis' in window)
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
     }
 
     function toggleVoice() {
@@ -194,7 +201,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg })
-      });
+      }).then(res => res.json())
+        .then(data => speak(data.message)); // Echo message
     }
 
     function updateConfig() {
