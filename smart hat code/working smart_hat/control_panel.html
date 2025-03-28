@@ -1,3 +1,4 @@
+<!-- Full control_panel.html with integrated UI -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -57,6 +58,19 @@
   <div id="map"></div>
   <div class="container">
     <div class="controls">
+      <h3>🔧 Ultrasonic Thresholds (cm)</h3>
+      <div>
+        <label>Left Front: <input type="range" id="lf" min="10" max="150" value="70" oninput="updateLabel('lf')"> <span id="lf_val">70</span></label><br>
+        <label>Left Middle: <input type="range" id="lm" min="10" max="150" value="70" oninput="updateLabel('lm')"> <span id="lm_val">70</span></label><br>
+        <label>Left Rear: <input type="range" id="lr" min="10" max="150" value="70" oninput="updateLabel('lr')"> <span id="lr_val">70</span></label><br>
+        <label>Right Front: <input type="range" id="rf" min="10" max="150" value="70" oninput="updateLabel('rf')"> <span id="rf_val">70</span></label><br>
+        <label>Right Middle: <input type="range" id="rm" min="10" max="150" value="70" oninput="updateLabel('rm')"> <span id="rm_val">70</span></label><br>
+        <label>Right Rear: <input type="range" id="rr" min="10" max="150" value="70" oninput="updateLabel('rr')"> <span id="rr_val">70</span></label><br>
+      </div>
+      <button onclick="applyThresholds()">Save Thresholds</button>
+    </div>
+
+    <div class="controls">
       <input type="text" id="destinationInput" placeholder="Search destination...">
       <button onclick="startVoiceSearch()">🎙 Voice</button>
       <button onclick="toggleVoice()" id="voiceToggle">🔊 Voice ON</button>
@@ -114,6 +128,28 @@
       console.log("[Socket Message]", data.message);
       speak(data.message);
     });
+
+    function updateLabel(id) {
+      document.getElementById(id + '_val').textContent = document.getElementById(id).value;
+    }
+
+    function applyThresholds() {
+      const thresholds = {
+        "Left Front": parseInt(document.getElementById('lf').value),
+        "Left Middle": parseInt(document.getElementById('lm').value),
+        "Left Rear": parseInt(document.getElementById('lr').value),
+        "Right Front": parseInt(document.getElementById('rf').value),
+        "Right Middle": parseInt(document.getElementById('rm').value),
+        "Right Rear": parseInt(document.getElementById('rr').value)
+      };
+
+      fetch('/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ultrasonic_thresholds: thresholds })
+      }).then(res => res.json())
+        .then(data => alert("Thresholds saved successfully!"));
+    }
 
     function initMap() {
       navigator.geolocation.getCurrentPosition(pos => {
@@ -202,7 +238,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg })
       }).then(res => res.json())
-        .then(data => speak(data.message)); // Echo message
+        .then(data => speak(data.message));
     }
 
     function updateConfig() {
