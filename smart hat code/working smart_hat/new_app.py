@@ -7,46 +7,193 @@
 # - Firebase + Flask SocketIO + ngrok tunnel
 
 from flask import Flask, request, jsonify, redirect, render_template_string, Response
-import subprocess
-import os
-import json
-import threading
-import cv2
-import numpy as np
+import subprocess, os, json, threading, cv2, numpy as np, time, lgpio, psutil, shutil, requests, socket
 import tflite_runtime.interpreter as tflite
 from picamera2 import Picamera2
 from datetime import datetime
-import time
-import lgpio
-import psutil
-import shutil
-import requests  # <-- Added for ngrok tunnel fetch
-
-# --- Firebase Admin Setup ---
-import firebase_admin
-from firebase_admin import credentials, firestore
+import pandas as pd
+from dash import Dash, dcc, html, Input, Output
+import dash_bootstrap_components as dbc
+import plotly.express as px
 from flask_socketio import SocketIO
+import firebase_admin
+from firebase_admin import credentials, firestore, storage
 
-# Initialize Firebase and Flask app
-cred = credentials.Certificate('/home/ada/de/smartaid-6c5c0-firebase-adminsdk-fbsvc-cee03b08da.json')
-firebase_admin.initialize_app(cred)
-db = firestore.client()
+# Initialize Firebase
+if not firebase_admin._apps:
+    cred = credentials.Certificate('/home/ada/de/smartaid-6c5c0-firebase-adminsdk-fbsvc-cee03b08da.json')
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://smartaid-6c5c0-default-rtdb.firebaseio.com/',
+        'storageBucket': 'smartaid-6c5c0.firebasestorage.app'
+    })
 
+# Flask + SocketIO
 app = Flask(__name__)
+app.config["PROPAGATE_EXCEPTIONS"] = True
+app.config["DEBUG"] = True
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# --- Configuration Files and Global State ---
-CONFIG_FILE = "/home/ada/de/detection/config.json"
+db = firestore.client()
+
+frame_lock = threading.Lock()
+
+# Global states
+health_status = "OK"
+detection_active = True
+config_data = {"indoor_mode": False}
+
+
+# --- Configuration Files and Global Paths ---
+
+
 LABEL_PATH = "/home/ada/de/coco_labels.txt"
 MODEL_PATH = "/home/ada/de/mobilenet_v2.tflite"
+CONFIG_FILE = "/home/ada/de/detection/config.json"
+
 
 voice_alert_enabled = True
 health_status = "OK"
 detection_active = True
 normalSize = (2028, 1520)
 lowresSize = (300, 300)
+
 latest_frame = None
-frame_lock = threading.Lock()
+frame_lock = threading.Lock()   # ✅ Add this here!
+indoor_mode = False
+
+
+# --- Dash Setup ---
+dash_app = Dash(__name__, server=app, url_base_pathname='/analytics/', external_stylesheets=[dbc.themes.DARKLY])
+dash_app.title = "Smart Hat Analytics"
+
+# Dash auto-refresh interval
+_dash_interval = dcc.Interval(id='interval', interval=10*1000, n_intervals=0)
+
+dash_app.layout = dbc.Container(fluid=True, children=[
+    html.H1("Smart Hat Analytics Dashboard", className="text-center my-4"),
+    _dash_interval,  # Interval to auto-update graphs
+    # Battery Level Graph
+    dcc.Graph(id='battery-graph'),
+    # Ultrasonic Sensor Data Graph
+    dcc.Graph(id='ultrasonic-graph'),
+    # System Health Metrics Graph
+    dcc.Graph(id='system-health-graph'),
+    # Motion Status Graph
+    dcc.Graph(id='motion-status-graph'),
+    # Detection Logs Graph (Bar and Pie)
+    dcc.Graph(id='detection-log-graph'),
+    # System Health Data (Heatmap)
+    dcc.Graph(id='system-health-heatmap')
+])
+
+# --- Callback for Battery Level ---
+@dash_app.callback(
+    Output('battery-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_battery(n):
+    df = fetch_battery_data()
+    if df.empty or 'timestamp' not in df.columns or 'battery_percentage' not in df.columns:
+        return px.line()
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    return px.line(df, x='timestamp', y='battery_percentage', title='Battery Level Over Time')
+
+# --- Callback for Ultrasonic Data ---
+@dash_app.callback(
+    Output('ultrasonic-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_ultrasonic_data(n):
+    df = fetch_ultrasonic_data()
+    if df.empty or 'timestamp' not in df.columns:
+        return px.line()
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    return px.line(df, x='timestamp', y=df.columns.difference(['timestamp']), title='Ultrasonic Sensor Data')
+
+# --- Callback for System Health ---
+@dash_app.callback(
+    Output('system-health-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_system_health(n):
+    df = fetch_system_health_data()
+    if df.empty or 'timestamp' not in df.columns:
+        return px.line()
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    return px.line(df, x='timestamp', y=['cpu', 'memory', 'temperature'], title='System Health Metrics')
+
+# --- Callback for Motion Status ---
+@dash_app.callback(
+    Output('motion-status-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_motion_status(n):
+    df = fetch_motion_data()
+    if df.empty or 'timestamp' not in df.columns:
+        return px.line()
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    return px.line(df, x='timestamp', y='motion_status', title='Motion Status Over Time')
+
+# --- Callback for Detection Logs ---
+@dash_app.callback(
+    Output('detection-log-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_detection_log(n):
+    df = fetch_detection_data()
+    if df.empty or 'timestamp' not in df.columns:
+        return px.bar()
+    return px.bar(df, x='timestamp', y='detection_count', title='Detections Over Time')
+
+
+
+def fetch_battery_data():
+    battery_ref = db.collection('battery_logs')
+    docs = [doc.to_dict() for doc in battery_ref.stream()]
+    print("Battery logs:", docs)
+    return pd.DataFrame(docs) if docs else pd.DataFrame()
+
+def fetch_ultrasonic_data():
+    ultrasonic_ref = db.collection('ultrasonic_logs')
+    docs = [doc.to_dict() for doc in ultrasonic_ref.stream()]
+    print("Ultrasonic logs:", docs)
+    rows = []
+    for doc in docs:
+        if 'timestamp' in doc and 'readings' in doc:
+            row = {'timestamp': doc['timestamp']}
+            row.update(doc['readings'])
+            rows.append(row)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+def fetch_system_health_data():
+    system_ref = db.collection('system_health_logs')
+    docs = [doc.to_dict() for doc in system_ref.stream()]
+    print("System health logs:", docs)
+    return pd.DataFrame(docs) if docs else pd.DataFrame()
+
+def fetch_detection_data():
+    detection_ref = db.collection('detection_logs')
+    docs = [doc.to_dict() for doc in detection_ref.stream()]
+    print("Detection logs:", docs)
+    if not docs:
+        return pd.DataFrame()
+    df = pd.DataFrame(docs)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    df['detection_count'] = 1
+    df = df.dropna(subset=['timestamp'])
+    return df.groupby(pd.Grouper(key='timestamp', freq='1min')).sum().reset_index()
+
+
+# --- Flask route for control panel UI ---
+@app.route('/')
+def home():
+    try:
+        with open("/home/ada/de/app_server/control_panel.html", "r") as f:
+            html = f.read()
+        return render_template_string(html)
+    except Exception as e:
+        return f"Error loading control panel: {e}"
+
 
 # Default config
 config_data = {
@@ -73,6 +220,7 @@ SENSORS = {
 
 CHIP = 4
 ultrasonic_readings = {}
+motion_active = False  # Track motion status
 last_ultra_speak_time = {}
 
 # --- Utility Functions ---
@@ -131,24 +279,122 @@ def ultrasonic_loop():
                 elif isinstance(dist, str):
                     failed.append(name)
             ultrasonic_readings = readings
+            db.collection('ultrasonic_logs').add({
+                'timestamp': int(time.time() * 1000),
+                'readings': readings,
+                'faults': failed
+            })
             health_status = "OK" if not failed else f"Sensor fault: {', '.join(failed)}"
             time.sleep(1)
     except Exception as e:
         print("[Ultrasonic Error]", e)
     finally:
         lgpio.gpiochip_close(h)
-
+# --- Example for logging with standardized timestamps ---
 def battery_monitor():
     warned = False
     while True:
         battery = psutil.sensors_battery()
         percent = battery.percent if battery else 100
+
+        # 🔋 Log to Firestore with standardized timestamp
+        db.collection('battery_logs').add({
+            'timestamp': int(time.time() * 1000),  # Standardized to milliseconds
+            'battery_percentage': percent
+        })
+
         if percent <= 20 and not warned:
             push_message_to_clients("Battery low. Please charge Smart Hat.")
             warned = True
         if percent > 30:
             warned = False
+
+        time.sleep(60)  # Log every minute
+
+        
+def system_metrics_monitor():
+    while True:
+        usage = {
+            "timestamp": int(time.time() * 1000),
+            "cpu": psutil.cpu_percent(),
+            "memory": psutil.virtual_memory().percent,
+            "temperature": psutil.sensors_temperatures().get("cpu-thermal", [{}])[0].get("current", 0)
+        }
+        db.collection("system_health_logs").add(usage)
         time.sleep(60)
+        
+def clear_all_logs():
+    collections = [
+        'battery_logs',
+        'ultrasonic_logs',
+        'motion_logs',
+        'detection_logs',
+        'location_logs',
+        'system_health_logs'
+    ]
+    for col in collections:
+        docs = db.collection(col).stream()
+        deleted = 0
+        for doc in docs:
+            doc.reference.delete()
+            deleted += 1
+        print(f"[CLEAR] Deleted {deleted} documents from {col}")
+
+
+
+
+# --- Video Recording and Upload ---
+def record_video(picam2, duration_sec=2, fps=30):
+    # Define the directory where videos are saved
+    video_dir = "/home/ada/de/videos"
+    
+    # Ensure the directory exists, if not create it
+    if not os.path.exists(video_dir):
+        os.makedirs(video_dir)
+
+    # Generate filename with a timestamp
+    filename = f"{video_dir}/alert_{int(time.time())}.avi"
+    
+    # Initialize the video writer with XVID codec
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(filename, fourcc, fps, normalSize)
+
+    # Record the video for the specified duration
+    for _ in range(int(duration_sec * fps)):
+        frame = picam2.capture_array("main")
+        out.write(frame)
+        time.sleep(1 / fps)
+    
+    out.release()
+
+    # Now upload the video to Firebase Storage
+    bucket = storage.bucket()
+    blob = bucket.blob(f"videos/{filename.split('/')[-1]}")
+    blob.upload_from_filename(filename)
+    blob.make_public()  # Make the file publicly accessible
+    print(f"[VIDEO] Uploaded to Firebase Storage: {blob.public_url}")
+
+    # Save metadata in Firestore
+    db.collection('video_logs').add({
+        'timestamp': int(time.time() * 1000),
+        'video_url': blob.public_url  # Store public URL to access the video
+    })
+
+    # Delete the video file from Raspberry Pi after upload
+    if os.path.exists(filename):
+        os.remove(filename)  # Delete the video file from the Pi
+        print(f"[VIDEO] Deleted local video file: {filename}")
+    else:
+        print(f"[ERROR] Video file not found for deletion: {filename}")
+
+
+def upload_to_firebase_storage(local_filename, remote_filename):
+    bucket = storage.bucket()
+    blob = bucket.blob(remote_filename)
+    blob.upload_from_filename(local_filename)
+    blob.make_public()
+    print(f"File uploaded to {blob.public_url}")
+
 
 def detection_loop():
     global latest_frame, detection_active
@@ -157,6 +403,8 @@ def detection_loop():
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
+
+    last_video_time = 0
 
     while True:
         if not detection_active:
@@ -200,6 +448,31 @@ def detection_loop():
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
+                    push_message_to_clients(f"{label} detected")
+
+                    db.collection('detection_logs').add({
+                        'timestamp': int(time.time() * 1000),
+                        'label': label,
+                        'confidence': float(scores[i]),
+                        'bounding_box': {
+                            'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2
+                        }
+                    })
+
+                    box_area = (x2 - x1) * (y2 - y1)
+                    frame_area = normalSize[0] * normalSize[1]
+                    rel_size = box_area / frame_area
+                    now = time.time()
+                    if now - last_speak_time > 5:
+                        push_message_to_clients(f"{label} detected")
+                        time.sleep(2)
+                        last_speak_time = now
+
+
+                    if rel_size > 0.10 and 'person' in label.lower() and (now - last_video_time > 10):
+                        threading.Thread(target=record_video, args=(picam2,), daemon=True).start()
+                        last_video_time = now
+
             ret, jpeg = cv2.imencode('.jpg', frame)
             if ret:
                 with frame_lock:
@@ -211,6 +484,17 @@ def detection_loop():
         picam2.stop()
 
 # --- API Routes ---
+
+
+@app.route("/shutdown", methods=["POST"])
+def shutdown_pi():
+    try:
+        subprocess.run(["sudo", "shutdown", "now"], check=False)
+        return jsonify({"message": "Shutdown command sent."})
+    except Exception as e:
+        return jsonify({"message": f"Shutdown failed: {e}"}), 500
+
+
 @app.route("/")
 def index():
     return redirect("/control_panel")
@@ -232,9 +516,11 @@ def video_feed():
                 if latest_frame is None:
                     continue
                 frame = latest_frame
-            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             time.sleep(0.05)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 
 @app.route("/status")
 def get_status():
@@ -294,11 +580,12 @@ def reset_wifi():
 def log_location():
     try:
         data = request.get_json()
+        print("[LOG] Location data received:", data)  # Debug print
         lat = data.get('lat')
         lng = data.get('lng')
         speed = data.get('speed')
         distance = data.get('distance')
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = int(time.time() * 1000)  # Millisecond precision
 
         # Create Firestore document
         db.collection('location_logs').add({
@@ -310,6 +597,9 @@ def log_location():
         })
         return jsonify({"status": "success"}), 200
     except Exception as e:
+        print("[ERROR] Failed to log location:", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/motion", methods=["POST"])
@@ -318,7 +608,40 @@ def receive_motion():
     motion = data.get("moving")
     global motion_active
     motion_active = motion
+    db.collection('motion_logs').add({
+        'timestamp': int(time.time() * 1000),
+        'motion_status': 'active' if motion else 'inactive'
+    })
     return jsonify({"status": "received", "motion": motion})
+
+@app.route("/latest_video_url")
+def latest_video_url():
+    try:
+        with open("/home/ada/de/latest_video.txt", "r") as f:
+            url = f.read().strip()
+        return jsonify({"url": url})
+    except:
+        return jsonify({"url": ""})
+        
+@app.route("/delete_logs", methods=["POST"])
+def delete_logs():
+    try:
+        collections = [
+            'battery_logs',
+            'ultrasonic_logs',
+            'motion_logs',
+            'detection_logs',
+            'location_logs',
+            'system_health_logs',
+            'video_logs'
+        ]
+        for col in collections:
+            docs = db.collection(col).stream()
+            for doc in docs:
+                doc.reference.delete()
+        return jsonify({"status": "success", "message": "All logs deleted."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
 
 # --- Ngrok Tunnel ---
 def start_ngrok():
@@ -333,23 +656,22 @@ def start_ngrok():
         print(f"[NGROK] Failed to start: {e}")
         return None
 
-# --- Start Services ---
-def run_flask_and_ngrok():
-    def run_ngrok_when_ready():
-        time.sleep(5)
+# --- Start Flask with Ngrok ---
+if __name__ == "__main__":
+    try:
         ngrok_proc = start_ngrok()
-        if ngrok_proc:
-            app.ngrok_proc = ngrok_proc
 
-    threading.Thread(target=ultrasonic_loop, daemon=True).start()
-    threading.Thread(target=battery_monitor, daemon=True).start()
-    threading.Thread(target=detection_loop, daemon=True).start()
-    threading.Thread(target=run_ngrok_when_ready, daemon=True).start()
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+        # Start services
+        threading.Thread(target=ultrasonic_loop, daemon=True).start()
+        threading.Thread(target=battery_monitor, daemon=True).start()
+        threading.Thread(target=detection_loop, daemon=True).start()
 
-try:
-    run_flask_and_ngrok()
-except KeyboardInterrupt:
-    if hasattr(app, "ngrok_proc"):
-        app.ngrok_proc.terminate()
-        print("[NGROK] Tunnel closed")
+        socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+    except KeyboardInterrupt:
+        if 'ngrok_proc' in locals():
+            ngrok_proc.terminate()
+            print("[NGROK] Tunnel closed")
+    except KeyboardInterrupt:
+        if 'ngrok_proc' in locals():
+            ngrok_proc.terminate()
+            print("[NGROK] Tunnel closed")
