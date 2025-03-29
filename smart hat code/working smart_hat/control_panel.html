@@ -89,6 +89,7 @@
   </style>
 </head>
 <body>
+  <!-- Navigation Bar -->
   <nav>
     <button onclick="switchSection('dashboard'); speak('Dashboard tab opened')">📊 Dashboard</button>
     <button onclick="switchSection('nav'); speak('Navigation tab opened')">🗺️ Navigation</button>
@@ -98,7 +99,7 @@
     <button onclick="switchSection('voice'); speak('Voice commands tab opened')">🔊 Voice</button>
     <button onclick="shutdownPi(); speak('Shutting down the Raspberry Pi')">⚠️ Power Off</button>
   </nav>
-
+  <!-- Dashboard Section -->
   <div id="dashboard" class="section active">
     <h2>Welcome to Smart Hat Dashboard</h2>
     <p>Use the tabs above to explore system features.</p>
@@ -113,7 +114,7 @@
       </div>
     </div>
   </div>
-
+  <!-- Navigation Section -->
   <div id="nav" class="section">
     <div id="map"></div>
     <input type="text" id="destinationInput" placeholder="Search destination..." />
@@ -123,8 +124,7 @@
       Speed: <span id="speed">0</span> km/h
     </div>
   </div>
-
- <body>
+  <!-- Detection Section -->
   <div id="detect" class="section">
     <h3>Detection Controls</h3>
     <label><input type="checkbox" id="muteToggle" onchange="toggleMute()" /> 🔇 Mute Voice Output</label>
@@ -143,74 +143,7 @@
       <ul id="detectionList" style="margin: 0; padding-left: 20px;"><li id="placeholder">No detections yet.</li></ul>
     </div>
   </div>
-
-  <script>
-    function speak(message) {
-      if (window.isMuted) return;
-      const synth = window.speechSynthesis;
-      const utter = new SpeechSynthesisUtterance(message);
-      synth.speak(utter);
-    }
-
-    let lastDetectionMessage = "";
-    const socket = io();
-
-    socket.on('speak', (data) => {
-      if (data.message) {
-        console.log("Speaking:", data.message);
-        lastDetectionMessage = data.message;
-        speak(data.message);
-        const logList = document.getElementById("detectionList");
-        const newItem = document.createElement("li");
-        const iconMap = {
-          person: "👤",
-          dog: "🐶",
-          car: "🚗"
-        };
-        let icon = "📦";
-        let tagClass = "";
-        const messageLower = data.message.toLowerCase();
-        if (messageLower.includes("person")) {
-          icon = iconMap.person;
-          tagClass = "color-person";
-        } else if (messageLower.includes("dog")) {
-          icon = iconMap.dog;
-          tagClass = "color-dog";
-        } else if (messageLower.includes("car")) {
-          icon = iconMap.car;
-          tagClass = "color-car";
-        }
-        newItem.className = tagClass;
-        newItem.textContent = `${new Date().toLocaleTimeString()} ${icon}: ${data.message}`;
-        const placeholder = document.getElementById("placeholder");
-        if (placeholder) placeholder.remove();
-        logList.prepend(newItem);
-        if (logList.children.length > 10) {
-          logList.removeChild(logList.lastChild);
-        }
-      }
-    });
-
-    function speakLastDetection() {
-      if (lastDetectionMessage) {
-        speak(lastDetectionMessage);
-      } else {
-        speak("No detection has been received yet.");
-      }
-    }
-
-    function clearDetectionLog() {
-      const logList = document.getElementById("detectionList");
-      logList.innerHTML = "<li id='placeholder'>No detections yet.</li>";
-      lastDetectionMessage = "";
-      speak("Detection log cleared.");
-    }
-    function toggleMute() {
-    window.isMuted = document.getElementById("muteToggle").checked;
-    speak(window.isMuted ? "Voice output muted." : "Voice output unmuted.");
-  }
-</script>
-
+  <!-- Sensor Section -->
   <div id="sensor" class="section">
     <h3>Ultrasonic Thresholds (cm)</h3>
     <label>Front: <input type="range" id="front" min="10" max="150" value="70" /></label><br />
@@ -224,7 +157,7 @@
       <a id="latestVideoLink" href="#" target="_blank" style="color: var(--primary); text-decoration: underline;">🎥 Watch Latest Video</a>
     </div>
   </div>
-
+  <!-- System Tools Section -->
   <div id="system" class="section">
     <h3>System Tools</h3>
     <label><input type="checkbox" id="indoorToggle" onchange="toggleIndoorMode()" /> Indoor Mode</label>
@@ -233,251 +166,286 @@
     <button onclick="toggleLog()">📄 Logs</button>
     <div id="log" class="log-box" style="display:none">Loading...</div>
   </div>
-
-  <div id="voice" class="section">
+  <!-- Voice Command Section -->
+<div id="voice" class="section">
     <h3>Custom Voice Command</h3>
     <input type="text" id="voiceInput" placeholder="Say something..." />
     <button onclick="sendVoice()">📢 Speak</button>
   </div>
+  <!-- JavaScript Functionalities -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+    let lastDetectionMessage = "";
+    let isMuted = false;
 
-  <!-- Functional Script for Navigation & Voice -->
-  <!-- INSERTED FROM PREVIOUS STEP -->
-  <!-- Your script with initMap, routeTo, voice, tracking etc. goes here -->
-<script>
-  function speak(message) {
-    const synth = window.speechSynthesis;
-    const utter = new SpeechSynthesisUtterance(message);
-    synth.speak(utter);
-  }
+    function speak(message) {
+      if (isMuted) return;
+      const synth = window.speechSynthesis;
+      const utter = new SpeechSynthesisUtterance(message);
+      synth.speak(utter);
+    }
 
-  const socket = io();
+    function toggleMute() {
+      isMuted = document.getElementById("muteToggle").checked;
+      speak(isMuted ? "Voice output muted." : "Voice output unmuted.");
+    }
+
+    function clearDetectionLog() {
+      const logList = document.getElementById("detectionList");
+      logList.innerHTML = "<li id='placeholder'>No detections yet.</li>";
+      lastDetectionMessage = "";
+      speak("Detection log cleared.");
+    }
+
+    function speakLastDetection() {
+      if (lastDetectionMessage) {
+        speak(lastDetectionMessage);
+      } else {
+        speak("No detection has been received yet.");
+      }
+    }
+
+    function switchSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
 
     socket.on('speak', (data) => {
       if (data.message) {
         console.log("Speaking:", data.message);
+        lastDetectionMessage = data.message;
         speak(data.message);
         const logList = document.getElementById("detectionList");
         const newItem = document.createElement("li");
-        newItem.textContent = `${new Date().toLocaleTimeString()}: ${data.message}`;
+        const iconMap = { person: "👤", dog: "🐶", car: "🚗" };
+        let icon = "📦";
+        const msg = data.message.toLowerCase();
+        if (msg.includes("person")) icon = iconMap.person;
+        else if (msg.includes("dog")) icon = iconMap.dog;
+        else if (msg.includes("car")) icon = iconMap.car;
+        newItem.textContent = `${new Date().toLocaleTimeString()} ${icon}: ${data.message}`;
+        const placeholder = document.getElementById("placeholder");
+        if (placeholder) placeholder.remove();
         logList.prepend(newItem);
+        if (logList.children.length > 10) {
+          logList.removeChild(logList.lastChild);
+        }
       }
     });
   </script>
-  
   <script>
-let map, directionsService, directionsRenderer, userLocation, watchId, routeSteps = [], currentStepIndex = 0, pathLine;
-let trackingPaused = false;
-const proximityThreshold = 25;
-const pathHistory = [];
+    let map, directionsService, directionsRenderer, userLocation, watchId, routeSteps = [], currentStepIndex = 0, pathLine;
+    let trackingPaused = false;
+    const proximityThreshold = 25;
+    const pathHistory = [];
 
-function switchSection(id) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-
-function initMap() {
-  navigator.geolocation.getCurrentPosition((pos) => {
-    userLocation = {
-      lat: pos.coords.latitude,
-      lng: pos.coords.longitude
-    };
-    map = new google.maps.Map(document.getElementById("map"), {
-      center: userLocation,
-      zoom: 15
-    });
-    directionsService = new google.maps.DirectionsService();
-    directionsRenderer = new google.maps.DirectionsRenderer({ map });
-  });
-}
-
-function startVoiceSearch() {
-  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = 'en-US';
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
-
-  recognition.onresult = function (event) {
-    const voiceText = event.results[0][0].transcript.toLowerCase().trim();
-    console.log("Heard:", voiceText);
-
-    if (voiceText.includes("where am i")) {
-      speakDetailedLocation();
-      return;
+    function switchSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
     }
 
-    const pattern = /^(?:hat\s*)?(go to|navigate to|find|search for|take me to|head to|travel to|get directions to|directions to)?\s*(.+)$/;
-    const match = voiceText.match(pattern);
-
-    if (match && match[2]) {
-      const destination = match[2].trim();
-      document.getElementById("destinationInput").value = destination;
-      speak(`Getting directions to ${destination}`);
-      routeTo(destination);
-    } else {
-      speak("Please say a valid command like 'navigate to library'.");
-    }
-  };
-
-  recognition.onerror = function (event) {
-    console.error("Voice recognition error:", event.error);
-    speak("Sorry, I didn't catch that. Try again.");
-  };
-
-  recognition.start();
-}
-
-function speakDetailedLocation() {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition((position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-
-      const geocoder = new google.maps.Geocoder();
-      const latLng = new google.maps.LatLng(lat, lng);
-
-      geocoder.geocode({ 'location': latLng }, function(results, status) {
-        if (status === google.maps.GeocoderStatus.OK) {
-          if (results[0]) {
-            const fullAddress = results[0].formatted_address;
-            const nearbyLandmarks = results[0].address_components
-              .filter(component => component.types.includes("establishment") || component.types.includes("point_of_interest"))
-              .map(landmark => landmark.long_name).join(", ");
-
-            let locationDetails = `You are at latitude ${lat}, longitude ${lng}. `;
-            locationDetails += `The address is: ${fullAddress}. `;
-            locationDetails += nearbyLandmarks ? `Nearby: ${nearbyLandmarks}.` : "No nearby landmarks found.";
-            speak(locationDetails);
-          } else {
-            speak(`Couldn't find a detailed address. You are at latitude ${lat}, longitude ${lng}.`);
-          }
-        } else {
-          speak("Could not fetch location details. Please try again.");
-        }
+    function initMap() {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        userLocation = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        };
+        map = new google.maps.Map(document.getElementById("map"), {
+          center: userLocation,
+          zoom: 15
+        });
+        directionsService = new google.maps.DirectionsService();
+        directionsRenderer = new google.maps.DirectionsRenderer({ map });
       });
-    }, () => {
-      speak("Sorry, I could not access your location.");
-    });
-  } else {
-    speak("Geolocation is not supported by your browser.");
-  }
-}
+    }
 
-function speak(message) {
-  const synth = window.speechSynthesis;
-  const utter = new SpeechSynthesisUtterance(message);
-  synth.speak(utter);
-}
+    function startVoiceSearch() {
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-function routeTo(place) {
-  if (!map || !directionsService || !directionsRenderer || !userLocation) {
-    speak("Navigation services not ready yet.");
-    return;
-  }
+      recognition.onresult = function (event) {
+        const voiceText = event.results[0][0].transcript.toLowerCase().trim();
+        console.log("Heard:", voiceText);
 
-  const service = new google.maps.places.PlacesService(map);
-  service.findPlaceFromQuery({ query: place, fields: ["geometry", "name"] }, (results, status) => {
-    if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
-      const location = results[0].geometry.location;
-      const request = {
-        origin: userLocation,
-        destination: location,
-        travelMode: google.maps.TravelMode.WALKING
+        if (voiceText.includes("where am i")) {
+          speakDetailedLocation();
+          return;
+        }
+
+        const pattern = /^(?:hat\s*)?(go to|navigate to|find|search for|take me to|head to|travel to|get directions to|directions to)?\s*(.+)$/;
+        const match = voiceText.match(pattern);
+
+        if (match && match[2]) {
+          const destination = match[2].trim();
+          document.getElementById("destinationInput").value = destination;
+          speak(`Getting directions to ${destination}`);
+          routeTo(destination);
+        } else {
+          speak("Please say a valid command like 'navigate to library'.");
+        }
       };
-      directionsService.route(request, function(result, status) {
-        if (status === google.maps.DirectionsStatus.OK) {
-          directionsRenderer.setDirections(result);
-          routeSteps = result.routes[0].legs[0].steps;
-          currentStepIndex = 0;
-          pathLine = new google.maps.Polyline({ path: [], map: map, strokeColor: '#00ffc8' });
-          startLiveTracking();
+
+      recognition.onerror = function (event) {
+        console.error("Voice recognition error:", event.error);
+        speak("Sorry, I didn't catch that. Try again.");
+      };
+
+      recognition.start();
+    }
+
+    function speakDetailedLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+
+          const geocoder = new google.maps.Geocoder();
+          const latLng = new google.maps.LatLng(lat, lng);
+
+          geocoder.geocode({ 'location': latLng }, function(results, status) {
+            if (status === google.maps.GeocoderStatus.OK) {
+              if (results[0]) {
+                const fullAddress = results[0].formatted_address;
+                const nearbyLandmarks = results[0].address_components
+                  .filter(component => component.types.includes("establishment") || component.types.includes("point_of_interest"))
+                  .map(landmark => landmark.long_name).join(", ");
+
+                let locationDetails = `You are at latitude ${lat}, longitude ${lng}. `;
+                locationDetails += `The address is: ${fullAddress}. `;
+                locationDetails += nearbyLandmarks ? `Nearby: ${nearbyLandmarks}.` : "No nearby landmarks found.";
+                speak(locationDetails);
+              } else {
+                speak(`Couldn't find a detailed address. You are at latitude ${lat}, longitude ${lng}.`);
+              }
+            } else {
+              speak("Could not fetch location details. Please try again.");
+            }
+          });
+        }, () => {
+          speak("Sorry, I could not access your location.");
+        });
+      } else {
+        speak("Geolocation is not supported by your browser.");
+      }
+    }
+
+    function speak(message) {
+      const synth = window.speechSynthesis;
+      const utter = new SpeechSynthesisUtterance(message);
+      synth.speak(utter);
+    }
+
+    function routeTo(place) {
+      if (!map || !directionsService || !directionsRenderer || !userLocation) {
+        speak("Navigation services not ready yet.");
+        return;
+      }
+
+      const service = new google.maps.places.PlacesService(map);
+      service.findPlaceFromQuery({ query: place, fields: ["geometry", "name"] }, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
+          const location = results[0].geometry.location;
+          const request = {
+            origin: userLocation,
+            destination: location,
+            travelMode: google.maps.TravelMode.WALKING
+          };
+          directionsService.route(request, function(result, status) {
+            if (status === google.maps.DirectionsStatus.OK) {
+              directionsRenderer.setDirections(result);
+              routeSteps = result.routes[0].legs[0].steps;
+              currentStepIndex = 0;
+              pathLine = new google.maps.Polyline({ path: [], map: map, strokeColor: '#00ffc8' });
+              startLiveTracking();
+            } else {
+              fallbackGeocode(place);
+            }
+          });
         } else {
           fallbackGeocode(place);
         }
       });
-    } else {
-      fallbackGeocode(place);
     }
-  });
-}
 
-function fallbackGeocode(place) {
-  speak("Could not find directions. Showing location on map.");
-  const geocoder = new google.maps.Geocoder();
-  geocoder.geocode({ address: place }, (res, geoStatus) => {
-    if (geoStatus === "OK" && res[0]) {
-      map.setCenter(res[0].geometry.location);
-      new google.maps.Marker({ map, position: res[0].geometry.location });
-    } else {
-      speak("Still couldn’t find that location.");
-    }
-  });
-}
-
-function startLiveTracking() {
-  if (navigator.geolocation) {
-    if (watchId) navigator.geolocation.clearWatch(watchId);
-    watchId = navigator.geolocation.watchPosition((pos) => {
-      if (trackingPaused) return;
-      const newPos = {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      };
-      userLocation = newPos;
-      map.setCenter(newPos);
-      new google.maps.Marker({ map, position: newPos });
-
-      const path = pathLine.getPath();
-      path.push(newPos);
-      pathHistory.push(newPos);
-      savePathToFirebase(newPos);
-
-      if (routeSteps.length && currentStepIndex < routeSteps.length) {
-        const step = routeSteps[currentStepIndex];
-        const stepPos = step.start_location;
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(
-          new google.maps.LatLng(stepPos.lat(), stepPos.lng()),
-          new google.maps.LatLng(newPos.lat, newPos.lng)
-        );
-
-        if (distance < proximityThreshold) {
-          let instruction = step.instructions.replace(/<[^>]*>/g, '');
-          const nextStep = routeSteps[currentStepIndex + 1];
-          const remainingDistance = nextStep ? google.maps.geometry.spherical.computeDistanceBetween(
-            new google.maps.LatLng(newPos.lat, newPos.lng),
-            new google.maps.LatLng(nextStep.start_location.lat(), nextStep.start_location.lng())
-          ) : 0;
-          instruction += `. You are approximately ${Math.round(remainingDistance)} meters from the next step.`;
-          speak(instruction);
-          currentStepIndex++;
+    function fallbackGeocode(place) {
+      speak("Could not find directions. Showing location on map.");
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode({ address: place }, (res, geoStatus) => {
+        if (geoStatus === "OK" && res[0]) {
+          map.setCenter(res[0].geometry.location);
+          new google.maps.Marker({ map, position: res[0].geometry.location });
+        } else {
+          speak("Still couldn’t find that location.");
         }
+      });
+    }
+
+    function startLiveTracking() {
+      if (navigator.geolocation) {
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+        watchId = navigator.geolocation.watchPosition((pos) => {
+          if (trackingPaused) return;
+          const newPos = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          };
+          userLocation = newPos;
+          map.setCenter(newPos);
+          new google.maps.Marker({ map, position: newPos });
+
+          const path = pathLine.getPath();
+          path.push(newPos);
+          pathHistory.push(newPos);
+          savePathToFirebase(newPos);
+
+          if (routeSteps.length && currentStepIndex < routeSteps.length) {
+            const step = routeSteps[currentStepIndex];
+            const stepPos = step.start_location;
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(stepPos.lat(), stepPos.lng()),
+              new google.maps.LatLng(newPos.lat, newPos.lng)
+            );
+
+            if (distance < proximityThreshold) {
+              let instruction = step.instructions.replace(/<[^>]*>/g, '');
+              const nextStep = routeSteps[currentStepIndex + 1];
+              const remainingDistance = nextStep ? google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(newPos.lat, newPos.lng),
+                new google.maps.LatLng(nextStep.start_location.lat(), nextStep.start_location.lng())
+              ) : 0;
+              instruction += `. You are approximately ${Math.round(remainingDistance)} meters from the next step.`;
+              speak(instruction);
+              currentStepIndex++;
+            }
+          }
+        }, (err) => {
+          console.error("Live tracking error:", err);
+          speak("Could not access your live location.");
+        }, { enableHighAccuracy: true });
+      } else {
+        speak("Geolocation is not supported by your browser.");
       }
-    }, (err) => {
-      console.error("Live tracking error:", err);
-      speak("Could not access your live location.");
-    }, { enableHighAccuracy: true });
-  } else {
-    speak("Geolocation is not supported by your browser.");
-  }
-}
+    }
 
-function toggleTracking() {
-  trackingPaused = !trackingPaused;
-  speak(trackingPaused ? "Navigation paused." : "Navigation resumed.");
-}
+    function toggleTracking() {
+      trackingPaused = !trackingPaused;
+      speak(trackingPaused ? "Navigation paused." : "Navigation resumed.");
+    }
 
-function savePathToFirebase(position) {
-  fetch('/log_location', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ lat: position.lat, lng: position.lng, timestamp: Date.now() })
-  });
-}
-</script>
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-
-
-  </body>
+    function savePathToFirebase(position) {
+      fetch('/log_location', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ lat: position.lat, lng: position.lng, timestamp: Date.now() })
+      });
+    }
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</body>
 </html>
