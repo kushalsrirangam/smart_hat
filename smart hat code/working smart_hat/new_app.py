@@ -122,6 +122,23 @@ def update_system_health(n):
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
     return px.line(df, x='timestamp', y=['cpu', 'memory', 'temperature'], title='System Health Metrics')
 
+@dash_app.callback(
+    Output('motion-graph', 'figure'),
+    Input('interval', 'n_intervals')
+)
+def update_motion_status(n):
+    df = fetch_motion_data()
+    if df.empty or 'timestamp' not in df.columns:
+        fig = px.line()
+        fig.add_annotation(text="No motion data available", x=0.5, y=0.5, showarrow=False)
+        return fig
+
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
+    df['motion_value'] = df['motion_status'].apply(lambda x: 1 if x == 'active' else 0)
+    df = df.sort_values('timestamp')
+
+    return px.step(df, x='timestamp', y='motion_value', title='Motion Status Over Time', labels={'motion_value': 'Motion (1=Active)'})
+
 # --- Callback for Motion Status ---
 @dash_app.callback(
     Output('motion-status-graph', 'figure'),
@@ -145,6 +162,11 @@ def update_detection_log(n):
         return px.bar()
     return px.bar(df, x='timestamp', y='detection_count', title='Detections Over Time')
 
+
+def fetch_motion_data():
+    motion_ref = db.collection('motion_logs')
+    docs = [doc.to_dict() for doc in motion_ref.stream()]
+    return pd.DataFrame(docs) if docs else pd.DataFrame()
 
 
 def fetch_battery_data():
@@ -405,6 +427,8 @@ def detection_loop():
     output_details = interpreter.get_output_details()
 
     last_video_time = 0
+    last_speak_time = 0
+    picam2 = None  # so we can safely stop in finally block
 
     while True:
         if not detection_active:
@@ -448,10 +472,15 @@ def detection_loop():
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-                    push_message_to_clients(f"{label} detected")
+                    now = time.time()
+
+                    # Only speak every 5 seconds
+                    if now - last_speak_time > 5:
+                        push_message_to_clients(f"{label} detected")
+                        last_speak_time = now
 
                     db.collection('detection_logs').add({
-                        'timestamp': int(time.time() * 1000),
+                        'timestamp': int(now * 1000),
                         'label': label,
                         'confidence': float(scores[i]),
                         'bounding_box': {
@@ -462,12 +491,6 @@ def detection_loop():
                     box_area = (x2 - x1) * (y2 - y1)
                     frame_area = normalSize[0] * normalSize[1]
                     rel_size = box_area / frame_area
-                    now = time.time()
-                    if now - last_speak_time > 5:
-                        push_message_to_clients(f"{label} detected")
-                        time.sleep(2)
-                        last_speak_time = now
-
 
                     if rel_size > 0.10 and 'person' in label.lower() and (now - last_video_time > 10):
                         threading.Thread(target=record_video, args=(picam2,), daemon=True).start()
@@ -481,7 +504,12 @@ def detection_loop():
     except Exception as e:
         print("[Detection Error]", e)
     finally:
-        picam2.stop()
+        if picam2:
+            try:
+                picam2.stop()
+            except Exception as e:
+                print("[Cleanup Error]", e)
+
 
 # --- API Routes ---
 
@@ -657,21 +685,22 @@ def start_ngrok():
         return None
 
 # --- Start Flask with Ngrok ---
+# --- Start Flask with Ngrok ---
 if __name__ == "__main__":
     try:
         ngrok_proc = start_ngrok()
 
-        # Start services
+        # Start background services
         threading.Thread(target=ultrasonic_loop, daemon=True).start()
         threading.Thread(target=battery_monitor, daemon=True).start()
         threading.Thread(target=detection_loop, daemon=True).start()
+        threading.Thread(target=system_metrics_monitor, daemon=True).start()
 
         socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+
     except KeyboardInterrupt:
-        if 'ngrok_proc' in locals():
-            ngrok_proc.terminate()
-            print("[NGROK] Tunnel closed")
-    except KeyboardInterrupt:
+        print("[INFO] KeyboardInterrupt detected. Shutting down gracefully...")
+
         if 'ngrok_proc' in locals():
             ngrok_proc.terminate()
             print("[NGROK] Tunnel closed")
