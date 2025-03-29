@@ -685,7 +685,6 @@ def start_ngrok():
         return None
 
 # --- Start Flask with Ngrok ---
-# --- Start Flask with Ngrok ---
 if __name__ == "__main__":
     try:
         ngrok_proc = start_ngrok()
