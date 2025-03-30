@@ -1,3 +1,5 @@
+// speech.js - Updated with full Speech object and Quiet Mode check
+
 const Speech = {
   synth: window.speechSynthesis,
   queue: [],
@@ -7,6 +9,7 @@ const Speech = {
   rate: 1,
   voicePref: 'female',
   ready: false,
+  quiet: false,
 
   init() {
     this.loadVoices(() => {
@@ -14,6 +17,13 @@ const Speech = {
       this.log("Speech system ready");
       this.populateVoiceSelector();
     });
+
+    // Fetch quiet mode status on init
+    fetch("/status")
+      .then(res => res.json())
+      .then(data => {
+        this.quiet = !!data.quiet_mode_enabled;
+      });
   },
 
   loadVoices(callback) {
@@ -41,7 +51,7 @@ const Speech = {
   },
 
   speak(msg, options = {}) {
-    if (this.muted || !msg || !this.ready) return;
+    if (this.muted || this.quiet || !msg || !this.ready) return;
 
     const utter = new SpeechSynthesisUtterance(msg);
     utter.pitch = options.pitch || this.pitch;
@@ -114,7 +124,7 @@ window.addEventListener('DOMContentLoaded', () => {
   socket.on('connect', () => console.log("[SocketIO] Connected"));
 
   socket.on('speak', (data) => {
-    if (!Speech.muted && data?.message) {
+    if (!Speech.muted && !Speech.quiet && data?.message) {
       const now = Date.now();
       if (data.message === lastSpokenMessage && now - lastSpokenTime < 1000) {
         console.log("[Speech] Duplicate message skipped:", data.message);
