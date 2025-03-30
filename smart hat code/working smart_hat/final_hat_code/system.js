@@ -1,4 +1,4 @@
-// system.js - Enhanced with Smart Voice Commands + Log Deletion Prompt
+// system.js - Enhanced with Smart Voice Commands + Log Deletion Prompt + Quiet Mode Toggle
 
 function toggleIndoorMode() {
   const enabled = document.getElementById("indoorToggle").checked;
@@ -13,6 +13,19 @@ function toggleIndoorMode() {
     });
 }
 
+function toggleQuietMode() {
+  const enabled = document.getElementById("quietToggle").checked;
+  fetch("/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quiet_mode_enabled: enabled })
+  })
+    .then(res => res.json())
+    .then(() => {
+      speak(enabled ? "Quiet mode enabled" : "Quiet mode disabled");
+    });
+}
+
 function checkStatus() {
   fetch("/status")
     .then(res => res.json())
@@ -20,10 +33,10 @@ function checkStatus() {
       document.getElementById("deviceName").textContent = navigator.userAgent;
       document.getElementById("currentMode").textContent = data.mode || "--";
       document.getElementById("quietStatus").textContent = data.quiet_mode_enabled ? "ON" : "OFF";
+      document.getElementById("quietToggle").checked = !!data.quiet_mode_enabled;
       speak(`Battery at ${data.battery} percent. Mode is ${data.mode}. Quiet mode is ${data.quiet_mode_enabled ? 'on' : 'off'}. Health status is ${data.health}`);
     });
 }
-
 
 function toggleLog() {
   const log = document.getElementById("log");
@@ -148,6 +161,14 @@ const voiceCommands = {
   "disable indoor mode": () => {
     document.getElementById("indoorToggle").checked = false;
     toggleIndoorMode();
+  },
+  "enable quiet mode": () => {
+    document.getElementById("quietToggle").checked = true;
+    toggleQuietMode();
+  },
+  "disable quiet mode": () => {
+    document.getElementById("quietToggle").checked = false;
+    toggleQuietMode();
   },
   "shut down": () => {
     shutdownPi();
