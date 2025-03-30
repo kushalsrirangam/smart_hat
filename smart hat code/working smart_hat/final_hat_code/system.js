@@ -51,7 +51,6 @@ function toggleLog() {
   }
 }
 
-// 🎯 Delete Logs with Prompt
 function deleteLogs() {
   const logs = [
     { key: "battery_logs", label: "Battery Logs" },
@@ -86,7 +85,6 @@ function deleteLogs() {
     .catch(() => speak("Error while deleting logs"));
 }
 
-// 🗂 Section Labels
 const sectionNames = {
   dashboard: "Dashboard",
   nav: "Navigation Mode",
@@ -96,7 +94,6 @@ const sectionNames = {
   voice: "Voice Commands"
 };
 
-// 🔀 UI Tab Switching + Feedback
 function switchSection(id, el = null) {
   document.querySelectorAll(".section").forEach(sec => sec.classList.remove("active"));
   const target = document.getElementById(id);
@@ -109,7 +106,6 @@ function switchSection(id, el = null) {
   speak(`${label} activated`);
 }
 
-// 🎤 Voice Setup
 const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
 recognition.lang = "en-US";
 recognition.interimResults = false;
@@ -131,28 +127,20 @@ recognition.onerror = function (event) {
   speak("Sorry, I didn't catch that.");
 };
 
-// 🤖 Voice Commands
 const voiceCommands = {
-  // Tabs
   "dashboard": () => switchSection("dashboard"),
   "open dashboard": () => switchSection("dashboard"),
-
   "navigation": () => switchSection("nav"),
   "open navigation": () => switchSection("nav"),
-
   "detection": () => switchSection("detect"),
   "open detection": () => switchSection("detect"),
-
   "sensor": () => switchSection("sensor"),
   "open sensors": () => switchSection("sensor"),
-
   "system": () => switchSection("system"),
   "open system": () => switchSection("system"),
-
   "voice": () => switchSection("voice"),
   "voice commands": () => switchSection("voice"),
 
-  // Smart Actions
   "check battery": () => checkStatus(),
   "enable indoor mode": () => {
     document.getElementById("indoorToggle").checked = true;
@@ -178,7 +166,6 @@ const voiceCommands = {
   "repeat detection": () => speakLastDetection(),
   "repeat message": () => speak(lastSpokenMessage),
 
-  // Navigation
   "where am i": () => speakDetailedLocation(),
   "get location": () => speakDetailedLocation(),
   "start voice navigation": () => startVoiceSearch(),
@@ -193,7 +180,6 @@ const voiceCommands = {
   }
 };
 
-// 🎯 Match & Execute
 function handleVoiceCommand(transcript) {
   for (const phrase in voiceCommands) {
     if (transcript.includes(phrase)) {
