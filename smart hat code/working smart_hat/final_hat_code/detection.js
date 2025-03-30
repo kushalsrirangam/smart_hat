@@ -1,3 +1,5 @@
+// detection.js - Updated with Quiet Mode Support
+
 const detectionModes = {
   home: [
     "person", "dog", "cat", "tv", "remote", "refrigerator", "microwave",
@@ -10,11 +12,11 @@ const detectionModes = {
 };
 
 let lastDetectionMessage = "";
+let quietMode = false;  // Flag for quiet mode
 const socket = io(window.location.origin);
 
-
 socket.on('speak', (data) => {
-  if (data.message) {
+  if (data.message && !quietMode) {
     console.log("Speaking:", data.message);
     lastDetectionMessage = data.message;
     speak(data.message);
@@ -31,9 +33,9 @@ socket.on('speak', (data) => {
 });
 
 function speakLastDetection() {
-  if (lastDetectionMessage) {
+  if (!quietMode && lastDetectionMessage) {
     speak(lastDetectionMessage);
-  } else {
+  } else if (!quietMode) {
     speak("No detection has been received yet.");
   }
 }
@@ -42,29 +44,13 @@ function clearDetectionLog() {
   const logList = document.getElementById("detectionList");
   logList.innerHTML = "<li id='placeholder'>No detections yet.</li>";
   lastDetectionMessage = "";
-  speak("Detection log cleared.");
+  if (!quietMode) speak("Detection log cleared.");
 }
 
 function updateMode() {
   const mode = document.getElementById("modeSelect").value;
-  speak(mode === "home" ? "Home mode activated" : "Public mode activated");
-
-  // 🔄 Also inform backend to apply system-wide mode
-  fetch("/mode", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode })
-  })
-  .then(res => res.json())
-  .then(data => {
-    console.log("Mode confirmed by server:", data);
-  })
-  .catch(err => {
-    speak("Failed to update mode on server.");
-    console.error("Mode update failed:", err);
-  });
+  if (!quietMode) speak(mode === "home" ? "Home mode activated" : "Public mode activated");
 }
-
 
 function updateConfig() {
   const mode = document.getElementById("modeSelect").value;
@@ -79,15 +65,20 @@ function updateConfig() {
   })
   .then(res => res.json())
   .then(data => {
-    speak(`Detection config updated for ${mode} mode.`);
+    if (!quietMode) speak(`Detection config updated for ${mode} mode.`);
     console.log("Updated config:", data);
   })
   .catch(err => {
-    speak("Failed to update detection config.");
+    if (!quietMode) speak("Failed to update detection config.");
     console.error("Update failed:", err);
   });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   updateMode();
+  fetch("/status")
+    .then(res => res.json())
+    .then(data => {
+      quietMode = !!data.quiet_mode_enabled;
+    });
 });
