@@ -17,9 +17,13 @@ function checkStatus() {
   fetch("/status")
     .then(res => res.json())
     .then(data => {
-      speak(`Battery at ${data.battery} percent. Health status is ${data.health}`);
+      document.getElementById("deviceName").textContent = navigator.userAgent;
+      document.getElementById("currentMode").textContent = data.mode || "--";
+      document.getElementById("quietStatus").textContent = data.quiet_mode_enabled ? "ON" : "OFF";
+      speak(`Battery at ${data.battery} percent. Mode is ${data.mode}. Quiet mode is ${data.quiet_mode_enabled ? 'on' : 'off'}. Health status is ${data.health}`);
     });
 }
+
 
 function toggleLog() {
   const log = document.getElementById("log");
