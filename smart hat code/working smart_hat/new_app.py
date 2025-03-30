@@ -59,6 +59,7 @@ lowresSize = (300, 300)
 
 latest_frame = None
 frame_lock = threading.Lock()   # ✅ Add this here!
+frame_counter = 0  # ✅ Initialize global frame counter for FPS
 indoor_mode = False
 
 
@@ -66,24 +67,21 @@ indoor_mode = False
 dash_app = Dash(__name__, server=app, url_base_pathname='/analytics/', external_stylesheets=[dbc.themes.DARKLY])
 dash_app.title = "Smart Hat Analytics"
 
-# Dash auto-refresh interval
 _dash_interval = dcc.Interval(id='interval', interval=10*1000, n_intervals=0)
 
 dash_app.layout = dbc.Container(fluid=True, children=[
     html.H1("Smart Hat Analytics Dashboard", className="text-center my-4"),
-    _dash_interval,  # Interval to auto-update graphs
-    # Battery Level Graph
+    _dash_interval,
     dcc.Graph(id='battery-graph'),
-    # Ultrasonic Sensor Data Graph
     dcc.Graph(id='ultrasonic-graph'),
-    # System Health Metrics Graph
     dcc.Graph(id='system-health-graph'),
-    # Motion Status Graph
     dcc.Graph(id='motion-status-graph'),
-    # Detection Logs Graph (Bar and Pie)
     dcc.Graph(id='detection-log-graph'),
-    # System Health Data (Heatmap)
-    dcc.Graph(id='system-health-heatmap')
+    dcc.Graph(id='system-health-heatmap'),
+    dcc.Graph(id='fps-graph'),             # ✅ New performance metrics
+    dcc.Graph(id='latency-graph'),         # ✅ New performance metrics
+    dcc.Graph(id='precision-graph'),       # ✅ New performance metrics
+    dcc.Graph(id='accuracy-graph')         # ✅ New performance metrics
 ])
 
 # --- Callback for Battery Level ---
@@ -162,6 +160,37 @@ def update_detection_log(n):
         return px.bar()
     return px.bar(df, x='timestamp', y='detection_count', title='Detections Over Time')
 
+@dash_app.callback(Output('fps-graph', 'figure'), Input('interval', 'n_intervals'))
+def update_fps(n):
+    df = fetch_detection_data(full=True)
+    if df.empty or 'frame_id' not in df.columns:
+        return px.line(title="FPS data unavailable")
+    df = df.sort_values('timestamp')
+    df['fps'] = df['frame_id'].diff() / df['timestamp'].diff().dt.total_seconds()
+    return px.line(df, x='timestamp', y='fps', title='FPS Over Time')
+
+@dash_app.callback(Output('latency-graph', 'figure'), Input('interval', 'n_intervals'))
+def update_latency(n):
+    df = fetch_detection_data(full=True)
+    return px.line(df, x='timestamp', y='duration_ms', title='Latency (ms) Over Time') if 'duration_ms' in df.columns else px.line(title="No latency data")
+
+@dash_app.callback(Output('precision-graph', 'figure'), Input('interval', 'n_intervals'))
+def update_precision(n):
+    df = fetch_detection_data(full=True)
+    if not {'true_positive', 'false_positive'}.issubset(df.columns):
+        return px.line(title="No precision data")
+    df['precision'] = df['true_positive'] / (df['true_positive'] + df['false_positive']).replace(0, np.nan)
+    return px.line(df, x='timestamp', y='precision', title='Precision Over Time')
+
+@dash_app.callback(Output('accuracy-graph', 'figure'), Input('interval', 'n_intervals'))
+def update_accuracy(n):
+    df = fetch_detection_data(full=True)
+    if not {'true_positive', 'false_positive', 'false_negative'}.issubset(df.columns):
+        return px.line(title="No accuracy data")
+    df['accuracy'] = df['true_positive'] / (df['true_positive'] + df['false_positive'] + df['false_negative']).replace(0, np.nan)
+    return px.line(df, x='timestamp', y='accuracy', title='Accuracy Over Time')
+
+
 
 def fetch_motion_data():
     motion_ref = db.collection('motion_logs')
@@ -193,18 +222,18 @@ def fetch_system_health_data():
     print("System health logs:", docs)
     return pd.DataFrame(docs) if docs else pd.DataFrame()
 
-def fetch_detection_data():
+def fetch_detection_data(full=False):
     detection_ref = db.collection('detection_logs')
     docs = [doc.to_dict() for doc in detection_ref.stream()]
-    print("Detection logs:", docs)
     if not docs:
         return pd.DataFrame()
     df = pd.DataFrame(docs)
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
-    df['detection_count'] = 1
     df = df.dropna(subset=['timestamp'])
-    return df.groupby(pd.Grouper(key='timestamp', freq='1min')).sum().reset_index()
-
+    df['detection_count'] = 1
+    if full:
+        return df
+    return df.groupby(pd.Grouper(key='timestamp', freq='1min')).sum(numeric_only=True).reset_index()
 
 # --- Flask route for control panel UI ---
 @app.route('/')
@@ -419,7 +448,7 @@ def upload_to_firebase_storage(local_filename, remote_filename):
 
 
 def detection_loop():
-    global latest_frame, detection_active
+    global latest_frame, detection_active, frame_counter
     labels = read_label_file(LABEL_PATH)
     interpreter = tflite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
@@ -428,7 +457,7 @@ def detection_loop():
 
     last_video_time = 0
     last_speak_time = 0
-    picam2 = None  # so we can safely stop in finally block
+    picam2 = None
 
     while True:
         if not detection_active:
@@ -456,7 +485,10 @@ def detection_loop():
             resized = cv2.resize(lores, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
             input_tensor = np.expand_dims(resized, axis=0)
             interpreter.set_tensor(input_details[0]['index'], input_tensor)
+
+            start_time = time.time()  # ✅ Start latency timer
             interpreter.invoke()
+            end_time = time.time()    # ✅ End latency timer
 
             boxes = interpreter.get_tensor(output_details[0]['index'])[0]
             classes = interpreter.get_tensor(output_details[1]['index'])[0]
@@ -469,12 +501,8 @@ def detection_loop():
                     label = labels.get(class_id, f"id:{class_id}")
                     x1, y1 = int(xmin * normalSize[0]), int(ymin * normalSize[1])
                     x2, y2 = int(xmax * normalSize[0]), int(ymax * normalSize[1])
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
                     now = time.time()
 
-                    # Only speak every 5 seconds
                     if now - last_speak_time > 5:
                         push_message_to_clients(f"{label} detected")
                         last_speak_time = now
@@ -483,10 +511,12 @@ def detection_loop():
                         'timestamp': int(now * 1000),
                         'label': label,
                         'confidence': float(scores[i]),
-                        'bounding_box': {
-                            'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2
-                        }
+                        'bounding_box': { 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2 },
+                        'duration_ms': round((end_time - start_time) * 1000),  # ✅ Latency
+                        'frame_id': frame_counter  # ✅ FPS tracking
                     })
+
+                    frame_counter += 1  # ✅ Increment frame ID
 
                     box_area = (x2 - x1) * (y2 - y1)
                     frame_area = normalSize[0] * normalSize[1]
@@ -509,6 +539,7 @@ def detection_loop():
                 picam2.stop()
             except Exception as e:
                 print("[Cleanup Error]", e)
+
 
 
 # --- API Routes ---
