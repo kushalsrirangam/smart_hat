@@ -9,11 +9,13 @@ let blueDot = null;
 
 // 🔊 Send voice message to Flask server (to be spoken on phone)
 function pushMessageToFlask(message) {
-  fetch("/speak", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message })
-  });
+  if (!Speech?.quiet) {
+    fetch("/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message })
+    });
+  }
 }
 
 function initMap() {
@@ -149,9 +151,8 @@ function startLiveTracking() {
 
     map.setCenter(newPos);
     map.setZoom(18);
-    map.setHeading(heading); // Optional: rotate map
+    map.setHeading(heading);
 
-    // 🔵 Blue Dot
     if (!blueDot) {
       blueDot = new google.maps.Marker({
         position: newPos,
@@ -169,7 +170,6 @@ function startLiveTracking() {
       blueDot.setPosition(newPos);
     }
 
-    // 🧭 Rotating Arrow
     if (!arrowMarker) {
       arrowMarker = new google.maps.Marker({
         position: newPos,
@@ -184,10 +184,7 @@ function startLiveTracking() {
       });
     } else {
       arrowMarker.setPosition(newPos);
-      arrowMarker.setIcon({
-        ...arrowMarker.getIcon(),
-        rotation: heading
-      });
+      arrowMarker.setIcon({ ...arrowMarker.getIcon(), rotation: heading });
     }
 
     const path = pathLine.getPath();
