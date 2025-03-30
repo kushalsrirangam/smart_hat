@@ -1,4 +1,4 @@
-// sensor.js - Handles ultrasonic thresholds and live video fullscreen toggle
+// sensor.js - Handles ultrasonic thresholds and live video fullscreen toggle with quiet mode support
 
 function applyThresholds() {
   const thresholds = {
@@ -17,11 +17,11 @@ function applyThresholds() {
   })
     .then(res => res.json())
     .then(data => {
-      speak("Thresholds updated successfully");
+      if (!Speech?.quiet) speak("Thresholds updated successfully");
     })
     .catch(err => {
       console.error("Failed to update thresholds:", err);
-      speak("Failed to update thresholds");
+      if (!Speech?.quiet) speak("Failed to update thresholds");
     });
 }
 
