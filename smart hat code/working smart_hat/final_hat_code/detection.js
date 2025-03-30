@@ -48,7 +48,23 @@ function clearDetectionLog() {
 function updateMode() {
   const mode = document.getElementById("modeSelect").value;
   speak(mode === "home" ? "Home mode activated" : "Public mode activated");
+
+  // 🔄 Also inform backend to apply system-wide mode
+  fetch("/mode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode })
+  })
+  .then(res => res.json())
+  .then(data => {
+    console.log("Mode confirmed by server:", data);
+  })
+  .catch(err => {
+    speak("Failed to update mode on server.");
+    console.error("Mode update failed:", err);
+  });
 }
+
 
 function updateConfig() {
   const mode = document.getElementById("modeSelect").value;
