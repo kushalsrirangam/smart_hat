@@ -102,13 +102,23 @@
   </div>
 
   <div id="system" class="section">
-    <h3>System Tools</h3>
-    <label><input type="checkbox" id="indoorToggle" onchange="toggleIndoorMode()" /> Indoor Mode</label>
-    <div class="log-box"><strong>Device:</strong> <span id="deviceName">--</span></div>
-    <button onclick="checkStatus()">📊 Check Status</button>
-    <button onclick="toggleLog()">📄 Logs</button>
-    <div id="log" class="log-box" style="display:none">Loading...</div>
+  <h3>System Tools</h3>
+  
+  <label><input type="checkbox" id="indoorToggle" onchange="toggleIndoorMode()" /> Indoor Mode</label><br>
+  <label><input type="checkbox" id="quietToggle" onchange="toggleQuietMode()" /> Quiet Mode</label><br>
+
+  <div class="log-box">
+    <strong>Device:</strong> <span id="deviceName">--</span><br>
+    <strong>Quiet:</strong> <span id="quietStatus">--</span><br>
+    <strong>Mode:</strong> <span id="currentMode">--</span>
   </div>
+
+  <button onclick="checkStatus()">📊 Check Status</button>
+  <button onclick="toggleLog()">📄 Logs</button>
+
+  <div id="log" class="log-box" style="display:none">Loading...</div>
+</div>
+
 
   <div id="voice" class="section">
     <h3>Custom Voice Command</h3>
