@@ -213,3 +213,4 @@ function handleVoiceCommand(transcript) {
 
 // Start wake word listening on load
 window.addEventListener("DOMContentLoaded", startWakeWordListener);
+K
