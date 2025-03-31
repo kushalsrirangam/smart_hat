@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Smart Aid - Control Panel</title>
+  <title>Smart Hat - Control Panel</title>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="web_app_style.css" />
 </head>
 <body>
-
   <nav>
     <button class="nav-btn" onclick="switchSection('dashboard', this);">📊 Dashboard</button>
     <button class="nav-btn" onclick="switchSection('nav', this);">🗺️ Navigation</button>
@@ -17,131 +16,173 @@
     <button class="nav-btn" onclick="switchSection('system', this);">🧠 System</button>
     <button class="nav-btn" onclick="switchSection('voice', this);">🔊 Voice</button>
     <button onclick="shutdownPi(); speak('Shutting down the Raspberry Pi')">⚠️ Power Off</button>
-    <button onclick="deleteLogs()">🧹 Delete All Logs</button>
+    <button onclick="deleteLogs()">🧹 Delete Logs</button>
   </nav>
 
-  <!-- Floating Voice Button -->
   <button class="floating-mic" onclick="startListening()">🎤</button>
+  <button class="emergency-btn" onclick="triggerEmergency()">🆘 Emergency</button>
 
   <div id="dashboard" class="section active">
-  <h2>Welcome to Smart Hat Dashboard</h2>
-  <p>Use the tabs above to explore system features.</p>
-
-  <div class="status-box">
-    Motion: <span id="motionStatus">--</span>
-  </div>
-
-  <div class="status-box" style="margin-top: 30px;">
-    <h3>📈 System Analytics</h3>
-    <div id="analytics-wrapper" style="position: relative;">
-      <div id="loading-spinner">
-        <span>🔄 Loading analytics...</span>
+    <h2>Smart Hat Dashboard</h2>
+    <div class="health-summary">
+      <div class="health-score">
+        <h3>System Health</h3>
+        <div class="health-gauge" id="healthGauge"></div>
+        <span id="healthScore">--</span>
       </div>
-      <div style="position:relative; padding-bottom:140%; height:0; overflow:hidden; border-radius:12px;">
-        <iframe 
-          src="https://smartaid.ngrok.io/analytics/" 
-          style="position:absolute; top:0; left:0; width:100%; height:100%; border:none; border-radius:12px; background-color:#1a1a1a;" 
-          allowfullscreen
-          onload="document.getElementById('loading-spinner').style.display='none'">
-        </iframe>
+      <div class="battery-status">
+        <h3>🔋 Battery</h3>
+        <div class="battery-gauge" id="batteryGauge"></div>
+        <span id="batteryLevel">--%</span>
       </div>
     </div>
+    
+    <div class="analytics-container">
+      <iframe src="https://smartaid.ngrok.io/analytics/" 
+              class="analytics-frame" 
+              id="analyticsFrame"></iframe>
+    </div>
   </div>
-</div>
-
 
   <div id="nav" class="section">
     <div id="map"></div>
-    <input type="text" id="destinationInput" placeholder="Search destination..." />
-    <button onclick="startVoiceSearch()">🎙 Voice</button>
-    <div class="status-box">
-      Distance: <span id="distanceTravelled">0</span> m<br />
-      Speed: <span id="speed">0</span> km/h
+    <div class="nav-controls">
+      <input type="text" id="destinationInput" placeholder="Search destination..." />
+      <button onclick="startVoiceSearch()">🎙 Voice Search</button>
+      <button onclick="toggleTracking()">⏯️ Pause Navigation</button>
+    </div>
+    <div class="nav-stats">
+      <div>Distance: <span id="distanceTravelled">0</span> m</div>
+      <div>Speed: <span id="speed">0</span> km/h</div>
+      <div>ETA: <span id="eta">--:--</span></div>
     </div>
   </div>
 
   <div id="detect" class="section">
     <h3>Detection Controls</h3>
-    <label><input type="checkbox" id="muteToggle" onchange="toggleMute()" /> 🔇 Mute Voice Output</label>
-    <br />
-    <label for="modeSelect">Mode:</label>
-    <select id="modeSelect" onchange="updateMode()">
-      <option value="home">🏠 Home</option>
-      <option value="public">🌆 Public</option>
-    </select>
-    <br />
-    <button onclick="updateConfig(); speak('Object filter applied')">✅ Apply</button>
-    <button onclick="speakLastDetection()">🔊 Repeat Last Detection</button>
-    <button onclick="clearDetectionLog()">🗑️ Clear Log</button>
+    <div class="detection-settings">
+      <label><input type="checkbox" id="muteToggle" onchange="toggleMute()" /> 🔇 Mute Voice</label>
+      <label for="modeSelect">Mode:</label>
+      <select id="modeSelect" onchange="updateMode()">
+        <option value="home">🏠 Home</option>
+        <option value="public">🌆 Public</option>
+      </select>
+      <button onclick="updateConfig()">✅ Apply Settings</button>
+    </div>
+    
+    <div class="detection-actions">
+      <button onclick="speakLastDetection()">🔊 Repeat Last</button>
+      <button onclick="clearDetectionLog()">🗑️ Clear Log</button>
+      <button onclick="captureSnapshot()">📸 Take Snapshot</button>
+    </div>
+    
     <div id="detectionLog" class="log-box">
-      <strong>Detections:</strong>
+      <h4>Recent Detections</h4>
       <ul id="detectionList"><li id="placeholder">No detections yet.</li></ul>
     </div>
   </div>
 
   <div id="sensor" class="section">
     <h3>Ultrasonic Thresholds (cm)</h3>
-    <label>Left Front: <input type="range" id="Left Front" min="10" max="150" value="70" /></label><br />
-    <label>Left Middle: <input type="range" id="Left Middle" min="10" max="150" value="70" /></label><br />
-    <label>Left Rear: <input type="range" id="Left Rear" min="10" max="150" value="70" /></label><br />
-    <label>Right Front: <input type="range" id="Right Front" min="10" max="150" value="70" /></label><br />
-    <label>Right Middle: <input type="range" id="Right Middle" min="10" max="150" value="70" /></label><br />
-    <label>Right Rear: <input type="range" id="Right Rear" min="10" max="150" value="70" /></label><br />
-
-    <button onclick="applyThresholds()">💾 Save Thresholds</button>
-    <button onclick="toggleFullScreen(document.getElementById('liveVideo'))">🖥 Full Screen</button>
-
-    <div id="sensor-video" style="margin-top:20px;">
-      <h3>Live Video Feed</h3>
-      <img id="liveVideo" src="/video_feed" alt="Live Stream" style="width:100%; border-radius:10px; border:none;" />
+    <div class="threshold-controls">
+      ${['Left Front', 'Left Middle', 'Left Rear', 'Right Front', 'Right Middle', 'Right Rear'].map(sensor => `
+        <div class="sensor-control">
+          <label>${sensor}: 
+            <input type="range" id="${sensor}" min="10" max="150" value="70" />
+            <span class="threshold-value">70 cm</span>
+          </label>
+        </div>
+      `).join('')}
     </div>
-
-    <div class="status-box">
-      <a id="latestVideoLink" href="#" target="_blank">🎥 Watch Latest Video</a>
+    
+    <div class="sensor-actions">
+      <button onclick="SensorManager.applyThresholds()">💾 Save Thresholds</button>
+      <button onclick="SensorManager.runCalibration()">⚙️ Calibrate</button>
+      <button onclick="toggleFullScreen(document.getElementById('liveVideo'))">🖥 Full Screen</button>
+    </div>
+    
+    <div id="sensorStatusGrid"></div>
+    
+    <div class="video-feed">
+      <h3>Live Video Feed</h3>
+      <img id="liveVideo" src="/video_feed" alt="Live Stream" />
+      <div class="video-actions">
+        <button onclick="recordVideoClip()">⏺️ Record Clip</button>
+        <a id="latestVideoLink" href="#" target="_blank">🎥 Latest Video</a>
+      </div>
     </div>
   </div>
 
   <div id="system" class="section">
-  <h3>System Tools</h3>
-  
-  <label><input type="checkbox" id="indoorToggle" onchange="toggleIndoorMode()" /> Indoor Mode</label><br>
-  <label><input type="checkbox" id="quietToggle" onchange="toggleQuietMode()" /> Quiet Mode</label><br>
-
-  <div class="log-box">
-    <strong>Device:</strong> <span id="deviceName">--</span><br>
-    <strong>Quiet:</strong> <span id="quietStatus">--</span><br>
-    <strong>Mode:</strong> <span id="currentMode">--</span>
+    <h3>System Tools</h3>
+    <div class="system-settings">
+      <label><input type="checkbox" id="indoorToggle" onchange="toggleIndoorMode()" /> Indoor Mode</label>
+      <label><input type="checkbox" id="quietToggle" onchange="toggleQuietMode()" /> Quiet Mode</label>
+      <label><input type="checkbox" id="wakeToggle" onchange="toggleWakeWord()" /> Wake Word</label>
+    </div>
+    
+    <div class="system-info">
+      <div><strong>Device:</strong> <span id="deviceName">--</span></div>
+      <div><strong>Firmware:</strong> <span id="firmwareVersion">v1.0.0</span></div>
+      <div><strong>Uptime:</strong> <span id="systemUptime">--</span></div>
+    </div>
+    
+    <div class="system-actions">
+      <button onclick="checkStatus()">📊 System Status</button>
+      <button onclick="checkForUpdates()">🔄 Check Updates</button>
+      <button onclick="toggleLog()">📄 View Logs</button>
+      <button onclick="backupSystem()">💾 Backup Config</button>
+      <button onclick="enableSafeMode()">🛡️ Safe Mode</button>
+    </div>
+    
+    <div id="log" class="log-box" style="display:none">Loading system logs...</div>
   </div>
-
-  <button onclick="checkStatus()">📊 Check Status</button>
-  <button onclick="toggleLog()">📄 Logs</button>
-
-  <div id="log" class="log-box" style="display:none">Loading...</div>
-</div>
-
 
   <div id="voice" class="section">
-    <h3>Custom Voice Command</h3>
-<label for="voiceSelector">Voice:</label>
-<select id="voiceSelector">
-  <option value="female">Female</option>
-  <option value="male">Male</option>
-</select>
-<br />
-<input type="text" id="voiceInput" placeholder="Say something..." />
-<button onclick="sendVoice()">📢 Speak</button>
+    <h3>Voice Command Center</h3>
+    <div class="voice-settings">
+      <label for="voiceSelector">Voice:</label>
+      <select id="voiceSelector">
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+      </select>
+      
+      <label for="voiceSpeed">Speed:</label>
+      <input type="range" id="voiceSpeed" min="0.5" max="2" step="0.1" value="1" />
+    </div>
+    
+    <div class="voice-test">
+      <input type="text" id="voiceInput" placeholder="Type command or speak..." />
+      <button onclick="sendVoice()">📢 Speak</button>
+      <button onclick="startListening()">🎙 Listen</button>
+    </div>
+    
+    <div class="command-history">
+      <h4>Recent Commands</h4>
+      <ul id="commandHistory"></ul>
+    </div>
   </div>
 
-  <!-- External JS Files -->
+  <!-- External Libraries -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBY3Yq8fMunZyBiHqjalocVA1yKyLCi4nw&libraries=places&callback=initMap" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initMap" async defer></script>
 
-  <!-- JS + Logic Order -->
+  <!-- Core Application Scripts -->
   <script src="speech.js"></script>
+  <script src="sensor.js"></script>
+  <script src="dashboard.js"></script>
   <script src="navigation.js"></script>
   <script src="detection.js"></script>
-  <script src="sensor.js"></script>
   <script src="system.js"></script>
-
+  <script src="voice.js"></script>
+  
+  <!-- Initialization -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      SensorManager.init();
+      DashboardManager.init();
+      VoiceCommandManager.init();
+    });
+  </script>
 </body>
 </html>
