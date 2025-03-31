@@ -1,216 +1,208 @@
-// system.js - Enhanced with Smart Voice Commands + Log Deletion Prompt + Quiet Mode Toggle + Wake Word Toggle
+// system.js - Enhanced with firmware updates, safe mode, and backup/restore
 
-let wakeListening = false;
-let wakeWordEnabled = true; // ✅ NEW: Toggle state
-
-function toggleIndoorMode() {
-  const enabled = document.getElementById("indoorToggle").checked;
-  fetch("/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ indoor_mode: enabled })
-  })
-    .then(res => res.json())
-    .then(() => {
-      speak(enabled ? "Indoor mode enabled" : "Indoor mode disabled");
-    });
-}
-
-function toggleQuietMode() {
-  const enabled = document.getElementById("quietToggle").checked;
-  fetch("/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ quiet_mode_enabled: enabled })
-  })
-    .then(res => res.json())
-    .then(() => {
-      speak(enabled ? "Quiet mode enabled" : "Quiet mode disabled");
-    });
-}
-
-function toggleWakeWord() {
-  wakeWordEnabled = document.getElementById("wakeToggle").checked;
-  if (wakeWordEnabled && !wakeListening) {
-    wakeRecognizer.start();
-    wakeListening = true;
-    speak("Wake word enabled");
-  } else if (!wakeWordEnabled && wakeListening) {
-    wakeRecognizer.stop();
-    wakeListening = false;
-    speak("Wake word disabled");
+class SystemManager {
+  static init() {
+    this.bindEvents();
+    this.loadSystemInfo();
+    this.setupWakeWordToggle();
   }
-}
 
-function checkStatus() {
-  fetch("/status")
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById("deviceName").textContent = navigator.userAgent;
-      document.getElementById("currentMode").textContent = data.mode || "--";
-      document.getElementById("quietStatus").textContent = data.quiet_mode_enabled ? "ON" : "OFF";
-      document.getElementById("quietToggle").checked = !!data.quiet_mode_enabled;
-      document.getElementById("wakeToggle").checked = wakeWordEnabled;
-      speak(`Battery at ${data.battery} percent. Mode is ${data.mode}. Quiet mode is ${data.quiet_mode_enabled ? 'on' : 'off'}. Health status is ${data.health}`);
-    });
-}
-
-function toggleLog() {
-  const log = document.getElementById("log");
-  log.style.display = log.style.display === "none" ? "block" : "none";
-  if (log.style.display === "block") {
-    log.textContent = "Loading...";
-    fetch("/status")
-      .then(res => res.json())
-      .then(data => {
-        log.innerHTML = `<strong>Status:</strong><br>Battery: ${data.battery}%<br>Health: ${data.health}`;
-      });
+  static bindEvents() {
+    document.getElementById('indoorToggle').addEventListener('change', this.toggleIndoorMode);
+    document.getElementById('quietToggle').addEventListener('change', this.toggleQuietMode);
+    document.getElementById('wakeToggle').addEventListener('change', this.toggleWakeWord);
+    document.getElementById('checkStatusBtn').addEventListener('click', this.checkSystemStatus);
+    document.getElementById('updateBtn').addEventListener('click', this.checkForUpdates);
+    document.getElementById('backupBtn').addEventListener('click', this.backupSystem);
+    document.getElementById('restoreBtn').addEventListener('click', this.restoreSystem);
+    document.getElementById('safeModeBtn').addEventListener('click', this.toggleSafeMode);
+    document.getElementById('shutdownBtn').addEventListener('click', this.shutdownSystem);
+    document.getElementById('rebootBtn').addEventListener('click', this.rebootSystem);
   }
-}
 
-function deleteLogs() {
-  const logs = [
-    { key: "battery_logs", label: "Battery Logs" },
-    { key: "motion_logs", label: "Motion Logs" },
-    { key: "detection_logs", label: "Detection Logs" },
-    { key: "location_logs", label: "Location Logs" },
-    { key: "system_health_logs", label: "System Health Logs" },
-    { key: "video_logs", label: "Video Logs" }
-  ];
-
-  const selected = prompt("🧹 Which logs do you want to delete?\nOptions:\n- all\n- battery, ultrasonic, detection...\n\n(Type comma-separated keys or 'all')");
-
-  if (!selected) return speak("Log deletion cancelled.");
-  const keys = selected.trim().toLowerCase() === "all"
-    ? logs.map(l => l.key)
-    : selected.split(",").map(k => k.trim());
-
-  fetch("/delete_logs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keys })
-  })
-    .then(res => res.json())
-    .then(res => {
-      if (res.status === "success") {
-        const deleted = logs.filter(l => keys.includes(l.key)).map(l => l.label).join(", ");
-        speak(`Deleted logs: ${deleted}`);
-      } else {
-        speak(`Failed to delete logs. ${res.message}`);
+  static async loadSystemInfo() {
+    try {
+      const response = await fetch('/system-info');
+      const data = await response.json();
+      
+      document.getElementById('deviceName').textContent = data.deviceName || 'Smart Hat';
+      document.getElementById('firmwareVersion').textContent = data.firmware || 'v1.0.0';
+      document.getElementById('systemUptime').textContent = this.formatUptime(data.uptime);
+      document.getElementById('networkStatus').textContent = data.network || 'Unknown';
+      
+      if (data.updateAvailable) {
+        this.showUpdateNotification(data.latestVersion);
       }
-    })
-    .catch(() => speak("Error while deleting logs"));
-}
-
-const sectionNames = {
-  dashboard: "Dashboard",
-  nav: "Navigation Mode",
-  detect: "Detection Panel",
-  sensor: "Sensor Settings",
-  system: "System Tools",
-  voice: "Voice Commands"
-};
-
-function switchSection(id, el = null) {
-  document.querySelectorAll(".section").forEach(sec => sec.classList.remove("active"));
-  const target = document.getElementById(id);
-  if (target) target.classList.add("active");
-
-  document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
-  if (el) el.classList.add("active");
-
-  const label = sectionNames[id] || id;
-  speak(`${label} activated`);
-}
-
-let wakeRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-wakeRecognizer.continuous = true;
-wakeRecognizer.interimResults = false;
-wakeRecognizer.lang = "en-US";
-
-wakeRecognizer.onresult = function (event) {
-  const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
-  if (wakeWordEnabled && (transcript.includes("hey hat") || transcript.includes("smart hat"))) {
-    speak("Yes? Listening now.");
-    recognition.start();
-  }
-};
-
-wakeRecognizer.onerror = function (event) {
-  console.error("Wake recognizer error:", event.error);
-};
-
-function startWakeWordListener() {
-  if (wakeWordEnabled && !wakeListening) {
-    wakeRecognizer.start();
-    wakeListening = true;
-    console.log("Wake word listener activated");
-  }
-}
-
-const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-recognition.lang = "en-US";
-recognition.interimResults = false;
-recognition.maxAlternatives = 1;
-
-function startListening() {
-  speak("Listening. Please say a command.");
-  recognition.start();
-}
-
-recognition.onresult = function (event) {
-  const transcript = event.results[0][0].transcript.toLowerCase().trim();
-  console.log("🎤 Heard:", transcript);
-  handleVoiceCommand(transcript);
-};
-
-recognition.onerror = function (event) {
-  console.error("Speech recognition error:", event.error);
-  speak("Sorry, I didn't catch that.");
-};
-
-const voiceCommands = {
-  "dashboard": () => switchSection("dashboard"),
-  "open dashboard": () => switchSection("dashboard"),
-  "navigation": () => switchSection("nav"),
-  "open navigation": () => switchSection("nav"),
-  "detection": () => switchSection("detect"),
-  "open detection": () => switchSection("detect"),
-  "sensor": () => switchSection("sensor"),
-  "open sensors": () => switchSection("sensor"),
-  "system": () => switchSection("system"),
-  "open system": () => switchSection("system"),
-  "voice": () => switchSection("voice"),
-  "voice commands": () => switchSection("voice"),
-  "check battery": () => checkStatus(),
-  "enable indoor mode": () => { document.getElementById("indoorToggle").checked = true; toggleIndoorMode(); },
-  "disable indoor mode": () => { document.getElementById("indoorToggle").checked = false; toggleIndoorMode(); },
-  "enable quiet mode": () => { document.getElementById("quietToggle").checked = true; toggleQuietMode(); },
-  "disable quiet mode": () => { document.getElementById("quietToggle").checked = false; toggleQuietMode(); },
-  "enable wake word": () => { document.getElementById("wakeToggle").checked = true; toggleWakeWord(); },
-  "disable wake word": () => { document.getElementById("wakeToggle").checked = false; toggleWakeWord(); },
-  "shut down": () => { shutdownPi(); speak("Shutting down the system"); },
-  "delete logs": () => deleteLogs(),
-  "repeat detection": () => speakLastDetection(),
-  "repeat message": () => speak(lastSpokenMessage),
-  "where am i": () => speakDetailedLocation(),
-  "get location": () => speakDetailedLocation(),
-  "start voice navigation": () => startVoiceSearch(),
-  "navigate to": () => startVoiceSearch(),
-  "pause navigation": () => { toggleTracking(); speak("Navigation paused"); },
-  "resume navigation": () => { toggleTracking(); speak("Navigation resumed"); }
-};
-
-function handleVoiceCommand(transcript) {
-  for (const phrase in voiceCommands) {
-    if (transcript.includes(phrase)) {
-      voiceCommands[phrase]();
-      return;
+    } catch (err) {
+      console.error("Failed to load system info:", err);
     }
   }
-  speak("Sorry, I didn't understand that command.");
-}
 
-// Start wake word listening on load
-window.addEventListener("DOMContentLoaded", startWakeWordListener);
+  static async toggleIndoorMode() {
+    const enabled = document.getElementById('indoorToggle').checked;
+    try {
+      const response = await fetch('/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ indoor_mode: enabled })
+      });
+      const result = await response.json();
+      
+      speak(enabled ? "Indoor mode enabled" : "Indoor mode disabled");
+      document.getElementById('indoorStatus').textContent = enabled ? 'ON' : 'OFF';
+    } catch (err) {
+      console.error("Failed to toggle indoor mode:", err);
+      speak("Failed to change mode");
+      document.getElementById('indoorToggle').checked = !enabled;
+    }
+  }
 
+  static async toggleQuietMode() {
+    const enabled = document.getElementById('quietToggle').checked;
+    try {
+      const response = await fetch('/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quiet_mode: enabled })
+      });
+      const result = await response.json();
+      
+      speak(enabled ? "Quiet mode enabled" : "Quiet mode disabled");
+      document.getElementById('quietStatus').textContent = enabled ? 'ON' : 'OFF';
+    } catch (err) {
+      console.error("Failed to toggle quiet mode:", err);
+      speak("Failed to change mode");
+      document.getElementById('quietToggle').checked = !enabled;
+    }
+  }
+
+  static async toggleWakeWord() {
+    const enabled = document.getElementById('wakeToggle').checked;
+    Speech.toggleWakeWord(enabled);
+    document.getElementById('wakeStatus').textContent = enabled ? 'ON' : 'OFF';
+    speak(enabled ? "Wake word enabled" : "Wake word disabled");
+  }
+
+  static async checkSystemStatus() {
+    try {
+      const response = await fetch('/system-status');
+      const data = await response.json();
+      
+      let statusMessage = `System status: ${data.health}. `;
+      statusMessage += `Battery: ${data.battery}%. `;
+      statusMessage += `CPU: ${data.cpu}%. `;
+      statusMessage += `Memory: ${data.memory}%. `;
+      statusMessage += `Temperature: ${data.temperature}°C.`;
+      
+      speak(statusMessage);
+      
+      // Update UI
+      document.getElementById('systemHealth').textContent = data.health;
+      document.getElementById('batteryLevel').textContent = `${data.battery}%`;
+      document.getElementById('cpuUsage').textContent = `${data.cpu}%`;
+      document.getElementById('memUsage').textContent = `${data.memory}%`;
+      document.getElementById('tempValue').textContent = `${data.temperature}°C`;
+      
+    } catch (err) {
+      console.error("Failed to check system status:", err);
+      speak("Unable to check system status");
+    }
+  }
+
+  static async checkForUpdates() {
+    speak("Checking for updates...");
+    try {
+      const response = await fetch('/system/updates');
+      const data = await response.json();
+      
+      if (data.updateAvailable) {
+        const confirmUpdate = confirm(`Version ${data.latestVersion} available. Install now?`);
+        if (confirmUpdate) {
+          this.performUpdate();
+        }
+      } else {
+        speak("System is up to date");
+      }
+    } catch (err) {
+      console.error("Failed to check updates:", err);
+      speak("Unable to check for updates");
+    }
+  }
+
+  static async performUpdate() {
+    speak("Starting system update. Do not power off.");
+    try {
+      const response = await fetch('/system/update', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.success) {
+        speak("Update complete. Rebooting...");
+        setTimeout(() => window.location.reload(), 5000);
+      } else {
+        speak(`Update failed: ${data.error}`);
+      }
+    } catch (err) {
+      console.error("Update failed:", err);
+      speak("Update failed. Please try again.");
+    }
+  }
+
+  static async backupSystem() {
+    speak("Creating system backup...");
+    try {
+      const response = await fetch('/system/backup', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.success) {
+        const backupTime = new Date(data.timestamp).toLocaleString();
+        speak(`Backup created successfully at ${backupTime}`);
+        
+        // Create download link
+        const link = document.createElement('a');
+        link.href = data.downloadUrl;
+        link.download = `smart-hat-backup-${data.timestamp}.zip`;
+        link.click();
+      } else {
+        speak("Backup failed");
+      }
+    } catch (err) {
+      console.error("Backup failed:", err);
+      speak("Backup failed. Please try again.");
+    }
+  }
+
+  static async restoreSystem() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.zip';
+    
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      speak(`Restoring from ${file.name}...`);
+      
+      try {
+        const formData = new FormData();
+        formData.append('backup', file);
+        
+        const response = await fetch('/system/restore', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          speak("Restore complete. Rebooting...");
+          setTimeout(() => window.location.reload(), 5000);
+        } else {
+          speak(`Restore failed: ${data.error}`);
+        }
+      } catch (err) {
+        console.error("Restore failed:", err);
+        speak("Restore failed. Please try again.");
+      }
+    };
+    
+    fileInput.click();
