@@ -1,2 +1,1 @@
-# smart_hat
-smart hat project
+THE MAIN WORKING CODE IS IN THE FINAL
