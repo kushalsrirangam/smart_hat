@@ -108,6 +108,31 @@ dash_app.layout = dbc.Container(fluid=True, children=[
     ], className="mb-4")
 ])
 
+
+# Sample log data (replace with your actual log data)
+logs = [
+    {'timestamp': '2025-03-29 12:00:00', 'motion': 'Detected', 'battery': 75, 'status': 'Active'},
+    {'timestamp': '2025-03-29 12:05:00', 'motion': 'No motion', 'battery': 72, 'status': 'Inactive'},
+    # Add more log entries here
+]
+
+# Function to convert logs to CSV
+def convert_logs_to_csv(logs):
+    filename = "/tmp/logs.csv"  # Path to temporary CSV file
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=logs[0].keys())
+        writer.writeheader()
+        writer.writerows(logs)
+    return filename
+
+# Route to serve the CSV file
+@app.route('/download_logs', methods=['GET'])
+def download_logs():
+    # Convert logs to CSV and return the file
+    csv_file = convert_logs_to_csv(logs)
+    return send_file(csv_file, as_attachment=True, download_name="logs.csv")
+
+
 # --- CALLBACKS ---
 
 @dash_app.callback(Output('battery-graph', 'figure'), Input('interval', 'n_intervals'))
